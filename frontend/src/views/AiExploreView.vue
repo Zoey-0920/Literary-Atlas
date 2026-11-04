@@ -3,8 +3,22 @@
 // - 真实模式：POST /api/agent/chat，只传 { message }（第一版接口无历史/上下文字段）
 // - Mock 模式：发送后由 API 层抛错，页面显示错误 + 重试；不伪造 AI 回复
 // - 页面顶部常驻"演示/接口待接入"提示条（仅 Mock 模式显示）
-import { ref, reactive, nextTick } from 'vue'
+import { ref, reactive, nextTick, watch } from 'vue'
 import { sendChatMessage, USE_MOCK } from '../api'
+
+// 聊天记录会话级持久化：sessionStorage 在页面切换/刷新后保留，关闭浏览器会话后自动清除
+const SESSION_KEY = 'literary-atlas:ai-chat'
+function loadSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    // 刷新时若某条 AI 回复仍处于加载中，转为错误态以便用户重试
+    return arr.map(m => (m.state === 'loading' ? { ...m, state: 'error', text: '页面刷新中断了本次回复，请重试。' } : m))
+  } catch { return [] }
+}
+function saveSession() {
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(messages)) } catch { /* 存储不可用时静默跳过 */ }
+}
 
 // 推荐问题（点击直接发送）
 const SUGGESTIONS = [
@@ -18,7 +32,17 @@ const draft = ref('')          // 输入框内容
 const sending = ref(false)     // 请求进行中（防重复提交）
 const listEl = ref(null)       // 消息列表 DOM（用于滚动）
 // 对话记录：{ role: 'user'|'ai', text, state: 'ok'|'loading'|'error' }
-const messages = reactive([])
+const messages = reactive(loadSession())
+// 任何消息变化（含流式输出）实时保存到会话存储，切换页面/刷新后不丢失
+watch(messages, saveSession, { deep: true })
+
+// 清空对话：二次确认，取消则完整保留
+function clearChat() {
+  if (!messages.length) return
+  if (!window.confirm('确定要清空全部聊天记录吗？清空后无法恢复。')) return
+  messages.splice(0, messages.length)
+  saveSession()
+}
 
 // 发送消息；pushUser=false 时用于"重试"，不再重复添加用户气泡
 async function send(text, pushUser = true) {
@@ -87,6 +111,10 @@ function scrollBottom() {
       AI 智能问答服务即将上线，当前暂无法回复消息，敬请期待。
     </div>
 
+    <div v-if="messages.length" class="chat-toolbar">
+      <button class="clear-btn" type="button" @click="clearChat">清空对话</button>
+    </div>
+
     <div class="chat-box">
       <!-- 消息列表 -->
       <div ref="listEl" class="msg-list">
@@ -149,6 +177,16 @@ function scrollBottom() {
   background: rgba(212, 180, 119, .08);
   font-size: 13px; color: var(--accent-soft);
 }
+
+/* 清空对话工具栏 */
+.chat-toolbar { margin-top: 16px; display: flex; justify-content: flex-end; }
+.clear-btn {
+  padding: 6px 14px; font-size: 13px; font-family: inherit;
+  color: var(--ink-dim); background: transparent;
+  border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
+  transition: color .2s, border-color .2s;
+}
+.clear-btn:hover { color: var(--accent); border-color: var(--accent); }
 
 /* 聊天主体 */
 .chat-box {
