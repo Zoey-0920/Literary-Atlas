@@ -31,6 +31,9 @@ from routers.reading import router as reading_router
 # 导入作者相关接口路由
 from routers.authors import router as authors_router
 
+# 导入自定义作品（自主添加书籍）接口路由
+from routers.custom_books import router as custom_books_router
+
 
 # lifespan：FastAPI 推荐的生命周期管理方式
 # 在应用启动、正式开始处理请求之前执行初始化
@@ -78,6 +81,9 @@ app.include_router(reading_router, prefix="/api/reading")
 
 # 注册作者接口路由，统一前缀为 /api/authors
 app.include_router(authors_router, prefix="/api/authors")
+
+# 注册自定义作品接口路由，统一前缀为 /api/custom-books
+app.include_router(custom_books_router, prefix="/api/custom-books")
 
 
 # GET / 接口：访问网站根路径时返回欢迎信息

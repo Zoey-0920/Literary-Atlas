@@ -84,13 +84,31 @@ const markers = computed(() => {
       return { id: c.id, kind: c.important ? 'major' : 'minor', name: c.city, x, y, data: c }
     })
   }
-  // 只显示有地理位置的书籍（手动添加的书 lat/lng 为 null，不参与地图展示）
-  return books.value
-    .filter(b => b.lat != null && b.lng != null)
-    .map(b => {
+  // 只显示有地理位置的书籍（手动添加的书 lat/lng 为 null，不参与地图展示）。
+  // 同一真实地点（同坐标）只生成一个标记，把该地点的全部书籍收进 data.books，
+  // 避免同位标记完全重叠、点击只能命中其中一本。
+  const STATUS_PRIORITY = { finished: 3, reading: 2, want_to_read: 1 }
+  const grouped = new Map()
+  for (const b of books.value) {
+    if (b.lat == null || b.lng == null) continue
+    const key = b.lat + '|' + b.lng
+    let g = grouped.get(key)
+    if (!g) {
       const [x, y] = project(b.lng, b.lat)
-      return { id: 'book-' + b.id, kind: b.status, name: b.city, x, y, data: b }
-    })
+      g = {
+        id: 'loc-' + key.replace(/[.-]/g, '_'),
+        kind: b.status,
+        name: b.city,
+        x, y,
+        data: { city: b.city, country: b.country, books: [] }
+      }
+      grouped.set(key, g)
+    }
+    g.data.books.push(b)
+    // 标记颜色取该地点下最高优先级的阅读状态：finished > reading > want_to_read
+    if ((STATUS_PRIORITY[b.status] || 0) > (STATUS_PRIORITY[g.kind] || 0)) g.kind = b.status
+  }
+  return [...grouped.values()]
 })
 
 // 视图状态：缩放 + 中心
@@ -213,7 +231,9 @@ watch(() => mapStore.focusRequest, (req) => {
     if (!b) return
     // 手动添加的书没有地理位置，跳过定位（避免坐标为空导致地图出错）
     if (b.lat == null || b.lng == null) return
-    lat = b.lat; lng = b.lng; id = 'book-' + b.id; mode = 'personal'
+    lat = b.lat; lng = b.lng; mode = 'personal'
+    // 聚合后的个人标记 id 由坐标派生（与 markers computed 的分组 key 一致）
+    id = 'loc-' + (b.lat + '|' + b.lng).replace(/[.-]/g, '_')
   }
   if (mapStore.mode !== mode) mapStore.mode = mode
   const [x, y] = project(lng, lat)
@@ -436,9 +456,16 @@ onBeforeUnmount(() => { if (ro) ro.disconnect() })
           <router-link class="popup-more" to="/works" @click="mapStore.selectedId = null">在阅读探索中查看 →</router-link>
         </template>
         <template v-else>
-          <p class="popup-city">{{ selected.data.title }}<span>{{ selected.data.author }}</span></p>
-          <p class="popup-summary">{{ selected.data.city }} · {{ selected.data.country }}</p>
-          <p class="popup-status">{{ bookStatusText(selected.data.status) }}</p>
+          <!-- 个人模式：同一地点聚合标记，展示该地点关联的全部书架书籍 -->
+          <p class="popup-city">{{ selected.data.city }}<span>{{ selected.data.country }}</span></p>
+          <div v-if="selected.data.books && selected.data.books.length" class="popup-booklist">
+            <router-link v-for="bk in selected.data.books" :key="bk.bookId"
+              class="popup-book" :to="'/works/' + bk.bookId" @click="mapStore.selectedId = null">
+              <span class="pb-title">《{{ bk.title }}》</span>
+              <span class="pb-status">{{ bookStatusText(bk.status) }}</span>
+            </router-link>
+          </div>
+          <p v-else class="popup-status">暂无书籍关联该地点。</p>
           <router-link class="popup-more" to="/bookshelf" @click="mapStore.selectedId = null">在书架中管理 →</router-link>
         </template>
       </aside>
@@ -641,6 +668,18 @@ onBeforeUnmount(() => { if (ro) ro.disconnect() })
 .popup-status { font-size: 13px; color: var(--accent-soft); margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
 .popup-more { display: inline-block; margin-top: 12px; font-size: 12px; color: var(--accent); }
 .popup-more:hover { color: var(--accent-soft); }
+
+/* ---- 个人模式地点弹窗：该地点关联的全部书架书籍列表 ---- */
+.popup-booklist { margin-top: 8px; display: flex; flex-direction: column; }
+.popup-book {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 2px; border-bottom: 1px solid var(--line);
+  font-size: 13px; color: var(--ink); text-decoration: none;
+}
+.popup-book:last-child { border-bottom: none; }
+.popup-book:hover .pb-title { color: var(--accent); }
+.pb-title { font-family: Georgia, 'Songti SC', serif; }
+.pb-status { font-size: 12px; color: var(--accent-soft); white-space: nowrap; }
 
 .zoom-controls { position: absolute; left: 16px; bottom: 16px; z-index: 15; display: flex; flex-direction: column; overflow: hidden; border: 1px solid rgba(212, 180, 119, .4); border-radius: 6px; background: rgba(13, 25, 41, .85); }
 .zoom-controls button { width: 34px; height: 34px; background: transparent; border: none; color: var(--ink); font-size: 16px; cursor: pointer; border-bottom: 1px solid var(--line); }

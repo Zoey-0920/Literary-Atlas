@@ -677,3 +677,25 @@ export function updateReading(recordId, patch) {
 export function deleteReading(recordId) {
   return request(`/api/reading/${recordId}`, { method: 'DELETE' })
 }
+
+// ---------- 自主添加书籍（自定义作品，AI 辅助） ----------
+
+/** AI 识别作品草案（只读不写库）：POST /api/custom-books/lookup
+ *  AI 调用较慢（可能数十秒），这里独立设置 90s 超时，不影响其他接口的默认超时 */
+export function lookupCustomBook(title, author) {
+  const body = { title }
+  const a = (author || '').trim()
+  if (a) body.author = a
+  return request('/api/custom-books/lookup', { method: 'POST', body, timeout: 90000 })
+}
+
+/** 保存自定义作品（用户确认后的草案）：POST /api/custom-books
+ *  成功返回 201 与含 id 的完整作品详情；同名同作者重复返回 409 */
+export function createCustomBook(payload) {
+  return request('/api/custom-books', { method: 'POST', body: payload })
+}
+
+/** 删除自定义作品（仅 source='custom'，公共作品后端返回 403）：DELETE /api/custom-books/{id} */
+export function deleteCustomBook(id) {
+  return request(`/api/custom-books/${id}`, { method: 'DELETE' })
+}

@@ -3,8 +3,18 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getWorks } from '../api'
+import AddBookModal from '../components/AddBookModal.vue'
 
 const router = useRouter()
+
+// 「添加书籍」弹窗开关（AI 辅助自主添加，保存成功后刷新列表）
+const showAddModal = ref(false)
+function onAddSaved() {
+  load() // 新作品已入库，刷新探索列表（书架数据由 bookshelfStore 内部自动同步）
+}
+function onAddClosed() {
+  showAddModal.value = false
+}
 
 // 作品列表经 API 层获取（USE_MOCK=false 时请求真实后端 /api/books，作者/流派/地点由作品详情补全）
 const allWorks = ref([])
@@ -101,6 +111,13 @@ function reset() {
         <p class="work-author">{{ w.author || '作者未知' }}</p>
         <p class="work-meta">{{ w.country || '未知国家' }} · {{ w.year || '年份不详' }}</p>
       </li>
+
+      <!-- 「添加书籍」入口卡片：始终位于当前列表末尾，不参与作品数据 -->
+      <li class="work-card add-card" @click="showAddModal = true">
+        <span class="add-plus" aria-hidden="true">＋</span>
+        <span class="add-text">添加书籍</span>
+        <span class="add-sub">AI 辅助识别作品与地点</span>
+      </li>
     </ul>
 
     <p v-if="!loading && !error && filteredWorks.length === 0" class="empty">
@@ -117,6 +134,9 @@ function reset() {
     <p class="back">
       <router-link to="/" class="btn btn-ghost-dark">返回世界地图</router-link>
     </p>
+
+    <!-- 添加书籍弹窗（AI 辅助） -->
+    <AddBookModal v-if="showAddModal" @close="onAddClosed" @saved="onAddSaved" />
   </div>
 </template>
 
@@ -155,6 +175,19 @@ function reset() {
 .work-title { font-family: Georgia, serif; font-size: 20px; color: var(--ink); }
 .work-author { font-size: 14px; color: var(--ink-soft, #C8C2B5); }
 .work-meta { font-size: 12px; color: var(--muted); }
+
+/* 「添加书籍」入口卡片：与作品卡片同尺寸同边框，内容居中 */
+.add-card {
+  align-items: center; justify-content: center; gap: 6px; text-align: center;
+  border-style: dashed; background: rgba(6, 12, 22, .45);
+}
+.add-card:hover { transform: translateY(-2px); }
+.add-plus {
+  font-size: 40px; line-height: 1; color: var(--accent);
+  text-shadow: 0 0 18px rgba(212, 180, 119, .35);
+}
+.add-text { font-family: Georgia, serif; font-size: 16px; color: var(--ink); }
+.add-sub { font-size: 12px; color: var(--muted); }
 
 .empty {
   padding: 40px 0; text-align: center; color: var(--muted); font-size: 14px;
