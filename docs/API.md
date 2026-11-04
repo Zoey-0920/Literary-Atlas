@@ -1,7 +1,7 @@
 # Literary Atlas 后端 API 文档
 
 > 服务地址：`http://127.0.0.1:8000`
-> 接口统一前缀：作品 `/api/books`、地点 `/api/places`、个人阅读 `/api/reading`、Agent `/api/agent`
+> 接口统一前缀：作品 `/api/books`、地点 `/api/places`、作者 `/api/authors`、个人阅读 `/api/reading`、Agent `/api/agent`
 
 ## 通用说明
 
@@ -759,6 +759,142 @@ Agent 会按需调用以下只读工具查询数据库后再组织回答，不�
 - 该字段仅作为未来扩展方案，第一版不实现。
 - 后续增加时必须保持向后兼容：旧版只传 `message` 的请求仍然有效。
 - `conversation_id` 不应成为第一版必填字段。
+
+---
+
+## 10. 作者接口
+
+> 接口统一前缀：`/api/authors`
+> 说明：本模块只做**只读查询**，不写数据库。作者与作品的关联来自 `book_authors` 表，`role` 取值为 `author`（作者）/ `translator`（译者）/ `editor`（编者）。
+
+### 10.1 获取作者列表
+
+`GET /api/authors`
+
+分页返回作者列表，可按姓名关键词模糊搜索，结果按 `id` 升序排列。
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 默认 | 范围 | 说明 |
+|------|------|------|------|------|------|
+| keyword | string | 否 | 无 | - | 可选，按作者姓名（`name`）模糊搜索，忽略首尾空格 |
+| limit | integer | 否 | 20 | 1 ~ 100 | 每页数量 |
+| offset | integer | 否 | 0 | >= 0 | 跳过的条数 |
+
+### 请求示例
+
+```
+GET /api/authors?limit=20&offset=0&keyword=马尔克斯
+```
+
+### 成功响应（HTTP 200）
+
+```json
+{
+  "total": 46,
+  "items": [
+    {
+      "id": 1,
+      "name": "加夫列尔·加西亚·马尔克斯",
+      "birth_year": 1927,
+      "death_year": 2014,
+      "nationality": "哥伦比亚",
+      "bio": "哥伦比亚作家。",
+      "created_at": "2026-11-03 07:30:45",
+      "updated_at": null
+    }
+  ]
+}
+```
+
+分页字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| total | integer | 符合筛选条件的作者总数（不是当前页条数） |
+| items | array | 当前页的作者数组 |
+
+`items` 元素字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | integer | 作者 id |
+| name | string | 作者姓名 |
+| birth_year | integer / null | 出生年份，未录入时为 `null` |
+| death_year | integer / null | 去世年份，未录入时为 `null` |
+| nationality | string / null | 国籍，未录入时为 `null` |
+| bio | string / null | 作者简介，未录入时为 `null` |
+| created_at | string | 记录创建时间（`YYYY-MM-DD HH:MM:SS`） |
+| updated_at | string / null | 记录更新时间，未更新时为 `null` |
+
+### 常见错误
+
+| 状态码 | 说明 |
+|--------|------|
+| 422 | `limit` 超出 1 ~ 100，或 `offset` 小于 0 |
+
+---
+
+### 10.2 查询作者详情
+
+`GET /api/authors/{author_id}`
+
+根据 id 查询作者详情（含其关联的全部作品）。
+
+### 路径参数
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| author_id | integer | 作者 id |
+
+### 成功响应（HTTP 200）
+
+```json
+{
+  "id": 1,
+  "name": "加夫列尔·加西亚·马尔克斯",
+  "birth_year": 1927,
+  "death_year": 2014,
+  "nationality": "哥伦比亚",
+  "bio": "哥伦比亚作家。",
+  "created_at": "2026-11-03 07:30:45",
+  "updated_at": null,
+  "books": [
+    {
+      "id": 2,
+      "title": "百年孤独",
+      "original_title": "Cien años de soledad",
+      "language": "西班牙语",
+      "publication_year": 1967,
+      "role": "author"
+    }
+  ]
+}
+```
+
+基本字段（`id`、`name`、`birth_year`、`death_year`、`nationality`、`bio`、`created_at`、`updated_at`）与「10.1 获取作者列表」中 `items` 元素一致，在此之上补充 `books` 字段。
+
+`books` 元素字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | integer | 作品 id |
+| title | string | 书名 |
+| original_title | string / null | 原语言书名，未录入时为 `null` |
+| language | string / null | 原著语言，未录入时为 `null` |
+| publication_year | integer / null | 首次出版年份，未录入时为 `null` |
+| role | string / null | 该作者在本作品中的角色：`author` / `translator` / `editor` |
+
+- `books[]` 为该作者通过 `book_authors` 关联的全部作品，按作品 id 升序排列。
+- 一个作者关联多部作品时全部返回，同一作品不会重复出现。
+- 作者未关联任何作品时，`books` 返回 `[]`。
+
+### 常见错误
+
+| 状态码 | 说明 |
+|--------|------|
+| 404 | 该 id 的作者不存在 |
+| 422 | `author_id` 不是整数 |
 
 ---
 
