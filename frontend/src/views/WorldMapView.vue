@@ -2,7 +2,7 @@
   <div class="container">
     <div class="page-head">
       <p class="eyebrow">Literary Atlas</p>
-      <h1 class="page-title">世界文学地图</h1>
+      <h1 class="page-title">世界阅读地图</h1>
     </div>
     <div class="placeholder">
       <div class="placeholder-mark">◈</div>

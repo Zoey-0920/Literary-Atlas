@@ -1,51 +1,56 @@
 /* =========================================================
-   Literary Atlas 全局样式
-   定义设计变量、基础排版、以及在多个页面复用的通用样式
+   Literary Atlas 全局样式 —— Celestial 深色奇幻文学星图
    ========================================================= */
 
-/* ---- 颜色变量（设计规范） ---- */
 :root {
-  /* 深蓝系：主品牌色，用于导航、页脚、强调 */
-  --deep: #141d33;
-  --deep-2: #1f2a45;
-  --night: #0e1426;
+  /* 语义主色（视觉方案） */
+  --bg: #080F1C;          /* 页面背景 */
+  --map-bg: #0D1929;      /* 地图 / 海洋背景 */
+  --bg-sidebar: #111E2E;  /* 侧边栏 / 左侧导航 */
+  --bg-card: #19283A;     /* 卡片 */
+  --land: #1B2E42;        /* 大陆填充（深色） */
+  --contour: #52657B;     /* 大陆轮廓 / 国界 */
+  --ink: #E9E1D2;         /* 主要文字 */
+  --muted: #91A0B2;       /* 辅助文字 */
+  --accent: #D4B477;      /* 强调金 */
+  --accent-soft: #E3C98F;
+  --accent-deep: #B08C4F;
+  --starlight: #F5DDA6;   /* 星光 / 星点 */
+  --line: #22344A;        /* 边框 */
 
-  /* 米白系：页面背景与卡片 */
-  --paper: #f6f1e7;
-  --paper-2: #efe7d6;
-  --paper-3: #fbf8f1;
-
-  /* 暖金系：点缀、按钮、高亮 */
-  --gold: #c19b59;
-  --gold-soft: #d9b98a;
-  --gold-deep: #a98546;
-
-  /* 文字与边框 */
-  --ink: #2a3347;
-  --muted: #7a8494;
-  --line: #e4dcc9;
+  /* 兼容旧变量名（占位页等仍引用） */
+  --deep: #111E2E;
+  --deep-2: #19283A;
+  --night: #080F1C;
+  --paper: #080F1C;
+  --paper-2: #111E2E;
+  --paper-3: #19283A;
+  --gold: #D4B477;
+  --gold-soft: #E3C98F;
+  --gold-deep: #B08C4F;
 }
 
-/* ---- 基础重置 ---- */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
-html, body {
-  height: 100%;
-}
+html, body, #app { height: 100%; }
 
 body {
   font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
   color: var(--ink);
-  background: var(--paper);
+  background: var(--bg);
   line-height: 1.7;
   -webkit-font-smoothing: antialiased;
 }
 
-/* 标题使用衬线字体，营造文学气息 */
+/* 全局星空底图：与预览一致的银河背景（所有页面共享） */
+#app {
+  background-image: url('../starfield-bg.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
 h1, h2, h3, h4 {
   font-family: "Georgia", "Songti SC", "Noto Serif SC", "STSong", serif;
   font-weight: 600;
@@ -53,90 +58,45 @@ h1, h2, h3, h4 {
   letter-spacing: 0.02em;
 }
 
-a {
-  color: inherit;
-  text-decoration: none;
-}
+a { color: inherit; text-decoration: none; }
 
-/* ---- 通用容器 ---- */
-.container {
-  width: 100%;
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 0 24px;
-}
+/* 深色滚动条 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #23384e; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #314b63; }
 
-/* ---- 按钮 ---- */
+/* 容器 */
+.container { width: 100%; max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+/* 按钮：金色边框 + 黑色填充 + 金色文字（激活/悬停态边框更亮） */
 .btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 26px;
-  border-radius: 2px;
-  font-size: 15px;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 0.2s ease;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 11px 24px; border-radius: 10px; font-size: 14px; cursor: pointer;
+  border: 1px solid transparent; transition: all .2s ease; background: transparent; color: var(--ink);
 }
 .btn-gold {
-  background: var(--gold);
-  color: #fff;
+  background: rgba(3, 6, 12, .9); color: #E3C78E;
+  border-color: rgba(210, 175, 110, .6);
+  box-shadow: 0 0 14px rgba(217, 186, 130, .12), inset 0 0 10px rgba(217, 186, 130, .05);
 }
 .btn-gold:hover {
-  background: var(--gold-deep);
+  background: rgba(3, 6, 12, .95); color: #F0DCAB;
+  border-color: rgba(246, 225, 170, .95);
+  box-shadow: 0 0 18px rgba(243, 226, 179, .25), inset 0 0 12px rgba(217, 186, 130, .1);
 }
-.btn-ghost {
-  background: transparent;
-  color: var(--gold-soft);
-  border-color: rgba(217, 185, 138, 0.5);
-}
-.btn-ghost:hover {
-  background: rgba(217, 185, 138, 0.12);
-  border-color: var(--gold-soft);
-}
-.btn-ghost-dark {
-  background: transparent;
-  color: var(--deep);
-  border-color: var(--gold);
-}
-.btn-ghost-dark:hover {
-  background: rgba(193, 155, 89, 0.12);
-}
+.btn-ghost { background: rgba(3, 6, 12, .85); color: #C9AB72; border-color: rgba(210, 175, 110, .5); }
+.btn-ghost:hover { background: rgba(3, 6, 12, .95); border-color: rgba(246, 225, 170, .95); color: #F0DCAB; }
+.btn-ghost-dark { background: rgba(3, 6, 12, .85); color: #C9AB72; border-color: rgba(210, 175, 110, .5); }
+.btn-ghost-dark:hover { background: rgba(3, 6, 12, .95); border-color: rgba(246, 225, 170, .95); color: #F0DCAB; }
 
-/* ---- 分区标题 ---- */
-.section-title {
-  font-size: 30px;
-  margin-bottom: 8px;
-}
-.section-sub {
-  color: var(--muted);
-  font-size: 15px;
-  margin-bottom: 32px;
-}
+/* 分区标题 */
+.section-title { font-size: 28px; margin-bottom: 8px; }
+.section-sub { color: var(--muted); font-size: 15px; margin-bottom: 28px; }
 
-/* ---- 占位页面（后续阶段填充内容，各占位视图复用） ---- */
-.page-head {
-  padding: 64px 0 24px;
-  border-bottom: 1px solid var(--line);
-}
-.page-head .eyebrow {
-  color: var(--gold-deep);
-  letter-spacing: 0.2em;
-  font-size: 12px;
-  text-transform: uppercase;
-}
-.page-title {
-  font-size: 34px;
-  margin-top: 8px;
-}
-.placeholder {
-  padding: 48px 0 80px;
-  text-align: center;
-  color: var(--muted);
-}
-.placeholder .placeholder-mark {
-  font-size: 40px;
-  color: var(--line);
-  margin-bottom: 12px;
-}
+/* 占位页（后续阶段填充内容） */
+.page-head { padding: 56px 0 24px; border-bottom: 1px solid var(--line); }
+.page-head .eyebrow { color: var(--accent); letter-spacing: .2em; font-size: 12px; text-transform: uppercase; }
+.page-title { font-size: 32px; margin-top: 8px; }
+.placeholder { padding: 48px 0 80px; text-align: center; color: var(--muted); }
+.placeholder .placeholder-mark { font-size: 40px; color: var(--line); margin-bottom: 12px; }

@@ -5,3 +5,14 @@ dist-ssr
 .DS_Store
 .vscode/*
 !.vscode/extensions.json
+
+# 环境变量和敏感配置
+.env
+.env.*
+!.env.example
+
+# 暂不提交的外部资源
+src/assets/resources/
+
+# 已废弃、当前无代码引用的旧背景
+src/assets/cosmos-bg.jpg

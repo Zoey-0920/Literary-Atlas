@@ -3,21 +3,25 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 // 各页面组件
 import HomeView from '../views/HomeView.vue'
-import WorldMapView from '../views/WorldMapView.vue'
 import WorksView from '../views/WorksView.vue'
+import WorkDetailView from '../views/WorkDetailView.vue'
 import AuthorDetailView from '../views/AuthorDetailView.vue'
 import BookshelfView from '../views/BookshelfView.vue'
 import FootprintView from '../views/FootprintView.vue'
+import ProfileView from '../views/ProfileView.vue'
 import AiExploreView from '../views/AiExploreView.vue'
 
 const routes = [
   { path: '/', name: 'home', component: HomeView },
-  { path: '/map', name: 'map', component: WorldMapView },
+  { path: '/map', redirect: '/' },
   { path: '/works', name: 'works', component: WorksView },
+  // 作品详情页：:id 是动态参数，例如 /works/2 表示查看 id 为 2 的作品
+  { path: '/works/:id', name: 'work-detail', component: WorkDetailView },
   // 作家详情页：:id 是动态参数，例如 /authors/3 表示查看 id 为 3 的作家
   { path: '/authors/:id', name: 'author', component: AuthorDetailView },
   { path: '/bookshelf', name: 'bookshelf', component: BookshelfView },
   { path: '/footprint', name: 'footprint', component: FootprintView },
+  { path: '/profile', name: 'profile', component: ProfileView },
   { path: '/ai', name: 'ai', component: AiExploreView }
 ]
 
