@@ -111,34 +111,34 @@ SEED_DATA = {
          "parent_place_id": None, "description": "《红楼梦》虚构园林。"},
         # --- 现实地点 ---
         {"name": "俄罗斯", "place_type": "country", "is_fictional": 0,
-         "latitude": None, "longitude": None, "country": None, "region": None,
+         "latitude": 66.4167, "longitude": 94.2500, "country": None, "region": None,
          "parent_place_id": None, "description": "国家。"},
         {"name": "莫斯科", "place_type": "city", "is_fictional": 0,
-         "latitude": None, "longitude": None, "country": "俄罗斯", "region": None,
+         "latitude": 55.7506, "longitude": 37.6175, "country": "俄罗斯", "region": None,
          "parent_place_id": None, "description": "城市。"},
         {"name": "圣彼得堡", "place_type": "city", "is_fictional": 0,
-         "latitude": None, "longitude": None, "country": "俄罗斯", "region": None,
+         "latitude": 59.9500, "longitude": 30.3167, "country": "俄罗斯", "region": None,
          "parent_place_id": None, "description": "城市。"},
         {"name": "伦敦", "place_type": "city", "is_fictional": 0,
-         "latitude": None, "longitude": None, "country": "英国", "region": None,
+         "latitude": 51.5072, "longitude": -0.1275, "country": "英国", "region": None,
          "parent_place_id": None, "description": "城市。"},
         {"name": "古巴", "place_type": "country", "is_fictional": 0,
-         "latitude": None, "longitude": None, "country": None, "region": None,
+         "latitude": 22.0000, "longitude": -79.5000, "country": None, "region": None,
          "parent_place_id": None, "description": "国家。"},
         {"name": "阿拉卡塔卡", "place_type": "city", "is_fictional": 0,
-         "latitude": None, "longitude": None, "country": "哥伦比亚", "region": None,
+         "latitude": 10.5911, "longitude": -74.1850, "country": "哥伦比亚", "region": None,
          "parent_place_id": None, "description": "城市。"},
         {"name": "墨西哥城", "place_type": "city", "is_fictional": 0,
-         "latitude": None, "longitude": None, "country": "墨西哥", "region": None,
+         "latitude": 19.3538, "longitude": -99.1359, "country": "墨西哥", "region": None,
          "parent_place_id": None, "description": "城市。"},
         {"name": "奥克帕克", "place_type": "city", "is_fictional": 0,
-         "latitude": None, "longitude": None, "country": "美国", "region": None,
+         "latitude": 41.8883, "longitude": -87.7894, "country": "美国", "region": None,
          "parent_place_id": None, "description": "城市。"},
         {"name": "莫蒂哈里", "place_type": "city", "is_fictional": 0,
-         "latitude": None, "longitude": None, "country": "印度", "region": None,
+         "latitude": 26.6500, "longitude": 84.9167, "country": "印度", "region": None,
          "parent_place_id": None, "description": "城市。"},
         {"name": "佛罗伦萨", "place_type": "city", "is_fictional": 0,
-         "latitude": None, "longitude": None, "country": "意大利", "region": None,
+         "latitude": 43.7714, "longitude": 11.2542, "country": "意大利", "region": None,
          "parent_place_id": None, "description": "城市。"},
     ],
     "book_authors": [
@@ -230,6 +230,23 @@ _ENTITY_UNIQUE_COLUMN = {
 }
 
 
+def _refresh_place_coordinates(conn: sqlite3.Connection, place_id: int, item: dict) -> None:
+    """复用已有地点时补充缺失的经纬度（成对写入满足 CHECK 约束）。
+
+    仅当数据源坐标成对非空且库内坐标成对为空时才写入；
+    不覆盖库内已有坐标，也不触碰其他字段。
+    """
+    lat = item.get("latitude")
+    lng = item.get("longitude")
+    if lat is None or lng is None:
+        return
+    conn.execute(
+        "UPDATE places SET latitude = ?, longitude = ? "
+        "WHERE id = ? AND latitude IS NULL AND longitude IS NULL",
+        (lat, lng, place_id),
+    )
+
+
 def _get_or_create_entity(conn: sqlite3.Connection, table: str, item: dict) -> int:
     """按自然键查找基础实体，不存在则插入，返回该实体 id。
 
@@ -243,6 +260,8 @@ def _get_or_create_entity(conn: sqlite3.Connection, table: str, item: dict) -> i
         f"SELECT id FROM {table} WHERE {unique_col} = ?", (unique_val,)
     ).fetchone()
     if row is not None:
+        if table == "places":
+            _refresh_place_coordinates(conn, row[0], item)
         return row[0]
 
     columns = _ENTITY_COLUMNS[table]

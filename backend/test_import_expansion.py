@@ -205,12 +205,19 @@ try:
         "SELECT COUNT(*) FROM places WHERE is_fictional = 1 "
         "AND (latitude IS NOT NULL OR longitude IS NOT NULL)"
     ).fetchone()[0]
-    any_coord = conn.execute(
-        "SELECT COUNT(*) FROM places WHERE latitude IS NOT NULL "
-        "OR longitude IS NOT NULL"
+    real_with_coord = conn.execute(
+        "SELECT COUNT(*) FROM places WHERE is_fictional = 0 "
+        "AND latitude IS NOT NULL AND longitude IS NOT NULL"
+    ).fetchone()[0]
+    real_without_coord = conn.execute(
+        "SELECT COUNT(*) FROM places WHERE is_fictional = 0 "
+        "AND (latitude IS NULL OR longitude IS NULL)"
     ).fetchone()[0]
     check("虚构地点：全部无经纬度", fictional_with_coord == 0)
-    check("坐标规则：所有地点经纬度均为 NULL（未核实，不编造）", any_coord == 0)
+    check(
+        "坐标规则：55 个已核实真实地点有坐标，8 个待确认项无坐标",
+        real_with_coord == 55 and real_without_coord == 8,
+    )
 finally:
     conn.close()
 

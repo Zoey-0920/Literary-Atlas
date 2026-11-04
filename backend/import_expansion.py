@@ -69,6 +69,24 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _refresh_place_coordinates(conn: sqlite3.Connection, place_id: int, item: dict) -> bool:
+    """复用已有地点时补充缺失的经纬度。
+
+    仅当数据源坐标成对非空且库内坐标成对为空时才写入（成对更新满足 CHECK 约束）；
+    不覆盖库内已有坐标，也不触碰其他字段。返回是否发生更新。
+    """
+    lat = item.get("latitude")
+    lng = item.get("longitude")
+    if lat is None or lng is None:
+        return False
+    cur = conn.execute(
+        "UPDATE places SET latitude = ?, longitude = ? "
+        "WHERE id = ? AND latitude IS NULL AND longitude IS NULL",
+        (lat, lng, place_id),
+    )
+    return cur.rowcount > 0
+
+
 def _get_or_create(conn: sqlite3.Connection, table: str, item: dict):
     """按自然键查找基础实体，不存在则插入；返回 (id, 是否新建)。"""
     unique_col = _ENTITY_UNIQUE_COLUMN[table]
@@ -78,7 +96,10 @@ def _get_or_create(conn: sqlite3.Connection, table: str, item: dict):
         f"SELECT id FROM {table} WHERE {unique_col} = ?", (unique_val,)
     ).fetchone()
     if row is not None:
-        return row["id"], False
+        existing_id = row["id"]
+        if table == "places":
+            _refresh_place_coordinates(conn, existing_id, item)
+        return existing_id, False
 
     columns = _ENTITY_COLUMNS[table]
     col_names = ", ".join(columns)
