@@ -10,6 +10,9 @@ from contextlib import asynccontextmanager
 # 从 fastapi 包中导入 FastAPI 类
 from fastapi import FastAPI
 
+# 导入跨域（CORS）中间件，用于允许指定前端来源访问后端接口
+from fastapi.middleware.cors import CORSMiddleware
+
 # 导入已有的数据库初始化函数（不重复实现建表逻辑）
 from database import init_db
 
@@ -24,6 +27,9 @@ from routers.agent import router as agent_router
 
 # 导入个人阅读记录接口路由
 from routers.reading import router as reading_router
+
+# 导入作者相关接口路由
+from routers.authors import router as authors_router
 
 
 # lifespan：FastAPI 推荐的生命周期管理方式
@@ -49,6 +55,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 配置跨域（CORS）：只允许明确列出的前端来源，不使用通配符 "*"
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type"],
+    allow_credentials=False,
+)
+
 # 注册作品接口路由，统一前缀为 /api/books
 app.include_router(books_router, prefix="/api/books")
 
@@ -60,6 +75,9 @@ app.include_router(agent_router, prefix="/api/agent")
 
 # 注册个人阅读记录接口路由，统一前缀为 /api/reading
 app.include_router(reading_router, prefix="/api/reading")
+
+# 注册作者接口路由，统一前缀为 /api/authors
+app.include_router(authors_router, prefix="/api/authors")
 
 
 # GET / 接口：访问网站根路径时返回欢迎信息
