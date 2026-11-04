@@ -1,0 +1,20 @@
+# Environment variables and API keys
+.env
+
+# SQLite databases and backups
+*.db
+*.db.backup*
+*.db.bak
+
+# Python virtual environments
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Test and tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

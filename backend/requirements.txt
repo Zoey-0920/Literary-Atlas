@@ -1,0 +1,26 @@
+# Literary Atlas 后端依赖清单
+# 版本依据：开发/验证环境（backend/.venv，Python 3.14.6）中 `pip show` 的实际版本，
+# 这些版本已通过项目全部测试；如遇安装问题可保持相同主版本向上微调。
+
+# ---------- 运行依赖 ----------
+
+# Web 框架：提供 FastAPI / APIRouter / HTTPException / Query 等（main.py、routers/）
+fastapi==0.162.0
+
+# ASGI 服务器：用于 `uvicorn main:app --reload` 启动服务
+# [standard] 附带 httptools/watchfiles/websockets，支持热重载与更高并发
+uvicorn[standard]==0.54.0
+
+# 数据校验：routers/ 直接 import BaseModel / StrictInt / field_validator / Field
+pydantic==2.14.2
+
+# LLM SDK：agent/llm_client.py 使用 AsyncOpenAI 调用 DeepSeek 兼容接口
+openai==3.42.1
+
+# 环境变量读取：agent/llm_client.py 使用 load_dotenv 加载 backend/.env
+python-dotenv==1.2.4
+
+# ---------- 测试依赖 ----------
+
+# 运行 test_*.py 时 fastapi.testclient.TestClient 所需的 HTTP 客户端
+httpx==0.28.1
