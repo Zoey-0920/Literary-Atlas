@@ -16,3 +16,6 @@ src/assets/resources/
 
 # 已废弃、当前无代码引用的旧背景
 src/assets/cosmos-bg.jpg
+
+# 本地手工备份（修改前快照，不提交）
+backup/

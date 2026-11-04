@@ -6,17 +6,31 @@ import { getWorks } from '../api'
 
 const router = useRouter()
 
-// 作品列表经 API 层获取（当前阶段 API 层内部读 mock）
+// 作品列表经 API 层获取（USE_MOCK=false 时请求真实后端 /api/books，作者/流派/地点由作品详情补全）
 const allWorks = ref([])
-onMounted(async () => { allWorks.value = await getWorks() })
+const loading = ref(false)
+const error = ref('')
+async function load() {
+  loading.value = true
+  error.value = ''
+  try {
+    allWorks.value = await getWorks()
+  } catch (e) {
+    // 真实模式后端不可达：展示错误并提供重试，不静默回退 Mock
+    error.value = (e && e.message) || '作品列表加载失败'
+  } finally {
+    loading.value = false
+  }
+}
+onMounted(load)
 
 const keyword = ref('')
 const countryFilter = ref('all')
 const genreFilter = ref('all')
 
-// 国家和流派筛选选项直接从现有数据推导，不写死
-const countries = computed(() => [...new Set(allWorks.value.map(w => w.country))])
-const genres = computed(() => [...new Set(allWorks.value.map(w => w.genre))])
+// 国家和流派筛选选项直接从现有数据推导，不写死（缺失字段不进入筛选项）
+const countries = computed(() => [...new Set(allWorks.value.map(w => w.country).filter(Boolean))])
+const genres = computed(() => [...new Set(allWorks.value.map(w => w.genre).filter(Boolean))])
 
 // 作品搜索：书名 / 作者 / 国家 / 流派 / 地点 任一处包含关键词即命中
 // （直接输入"法国"这类国家名也能找到该国作品）
@@ -72,17 +86,24 @@ function reset() {
       <button class="btn btn-ghost-dark btn-sm" @click="reset">重置</button>
     </div>
 
+    <!-- 加载 / 错误状态 -->
+    <p v-if="loading" class="empty">正在加载作品列表…</p>
+    <div v-else-if="error" class="empty">
+      <span class="err-text">作品列表加载失败：{{ error }}</span>
+      <button class="btn btn-ghost-dark btn-sm" @click="load">重试</button>
+    </div>
+
     <!-- 作品列表 -->
-    <ul class="grid">
+    <ul v-else class="grid">
       <li v-for="w in filteredWorks" :key="w.id" class="work-card" @click="goDetail(w)">
-        <span class="genre-chip">{{ w.genre }}</span>
+        <span v-if="w.genre" class="genre-chip">{{ w.genre }}</span>
         <h2 class="work-title">{{ w.title }}</h2>
-        <p class="work-author">{{ w.author }}</p>
-        <p class="work-meta">{{ w.country }} · {{ w.year }}</p>
+        <p class="work-author">{{ w.author || '作者未知' }}</p>
+        <p class="work-meta">{{ w.country || '未知国家' }} · {{ w.year || '年份不详' }}</p>
       </li>
     </ul>
 
-    <p v-if="filteredWorks.length === 0" class="empty">
+    <p v-if="!loading && !error && filteredWorks.length === 0" class="empty">
       <span>没有找到符合条件的作品。</span>
       <span v-if="keyword.trim() || countryFilter !== 'all' || genreFilter !== 'all'" class="empty-cond">
         当前条件：
@@ -140,5 +161,6 @@ function reset() {
   display: flex; flex-direction: column; align-items: center; gap: 10px;
 }
 .empty-cond { color: var(--accent-soft); }
+.err-text { color: #e2a49c; }
 .back { margin-top: 30px; padding-bottom: 40px; }
 </style>

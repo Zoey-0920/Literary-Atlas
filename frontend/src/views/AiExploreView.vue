@@ -1,11 +1,10 @@
 <script setup>
 // AI 文学助手页：完整聊天界面
-// - 当前 USE_MOCK = true，后端 AI 接口未接入：发送后由 API 层抛错，页面显示错误 + 重试
-// - 不伪造 AI 回复；页面顶部有常驻"演示/接口待接入"提示条
-// - 请求时附带的个人上下文仅含已读/在读/想读书名数组，来自 bookshelfStore，不发送其他个人信息
-import { ref, reactive, onMounted, nextTick } from 'vue'
+// - 真实模式：POST /api/agent/chat，只传 { message }（第一版接口无历史/上下文字段）
+// - Mock 模式：发送后由 API 层抛错，页面显示错误 + 重试；不伪造 AI 回复
+// - 页面顶部常驻"演示/接口待接入"提示条（仅 Mock 模式显示）
+import { ref, reactive, nextTick } from 'vue'
 import { sendChatMessage, USE_MOCK } from '../api'
-import { books, initBookshelf } from '../store/bookshelfStore'
 
 // 推荐问题（点击直接发送）
 const SUGGESTIONS = [
@@ -21,22 +20,6 @@ const listEl = ref(null)       // 消息列表 DOM（用于滚动）
 // 对话记录：{ role: 'user'|'ai', text, state: 'ok'|'loading'|'error' }
 const messages = reactive([])
 
-onMounted(() => { initBookshelf() }) // 幂等：确保个人上下文数据就绪
-
-// 个人阅读上下文：仅书名数组（不含其他信息），随请求发送供 AI 参考
-function shelfContext() {
-  const by = s => books.value.filter(b => b.status === s).map(b => b.title)
-  return { read: by('read'), reading: by('reading'), want: by('want') }
-}
-
-// 近几轮成功对话（作为 history 传给后端，格式待与成员 B 确认）
-function recentHistory() {
-  return messages
-    .filter(m => m.state === 'ok')
-    .slice(-6)
-    .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }))
-}
-
 // 发送消息；pushUser=false 时用于"重试"，不再重复添加用户气泡
 async function send(text, pushUser = true) {
   const t = (text || '').trim()
@@ -49,11 +32,8 @@ async function send(text, pushUser = true) {
   const aiMsg = reactive({ role: 'ai', text: '', state: 'loading' })
   messages.push(aiMsg)
   try {
-    const res = await sendChatMessage({
-      message: t,
-      history: recentHistory(),
-      context: shelfContext()
-    })
+    // 严格按 docs/API.md：请求体只有 message 字段，不携带其他个人信息
+    const res = await sendChatMessage({ message: t })
     aiMsg.text = res.reply
     aiMsg.state = 'ok'
   } catch (e) {

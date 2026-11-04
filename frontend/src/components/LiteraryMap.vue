@@ -7,7 +7,7 @@ import starfieldUrl from '../assets/starfield-bg.jpg'
 import nebulaUrl from '../assets/nebula-land.jpg'
 import textureUrl from '../assets/land-texture.jpg'
 import { mapStore } from '../store/mapStore'
-import { getCities } from '../api'
+import { getCities, getPlaceLiterature, USE_MOCK } from '../api'
 import { books, initBookshelf } from '../store/bookshelfStore'
 
 // 城市数据由 API 层异步提供；书架数据来自统一 store（与书架页共享同一份）
@@ -66,7 +66,7 @@ const graticule = (() => {
 // 个人地图高亮国家
 const readCodes = computed(() => {
   const s = new Set()
-  for (const b of books.value) if (b.status === 'read') s.add(b.countryCode)
+  for (const b of books.value) if (b.status === 'finished') s.add(b.countryCode)
   return s
 })
 function countryClass(c) {
@@ -209,7 +209,7 @@ watch(() => mapStore.focusRequest, (req) => {
     if (!c) return
     lat = c.lat; lng = c.lng; id = c.id; mode = 'overview'
   } else {
-    const b = books.value.find(x => x.id === req.id)
+    const b = books.value.find(x => String(x.bookId ?? x.id) === String(req.id))
     if (!b) return
     // 手动添加的书没有地理位置，跳过定位（避免坐标为空导致地图出错）
     if (b.lat == null || b.lng == null) return
@@ -224,8 +224,8 @@ watch(() => mapStore.focusRequest, (req) => {
   mapStore.selectedId = id
 })
 
-// 书籍弹窗的状态文案（支持已读 / 在读 / 想读三种状态）
-const BOOK_STATUS_TEXT = { read: '已读 · 阅读足迹', reading: '在读 · 阅读进行中', want: '想读 · 等待启程' }
+// 书籍弹窗的状态文案（状态值与后端一致）
+const BOOK_STATUS_TEXT = { finished: '已读 · 阅读足迹', reading: '在读 · 阅读进行中', want_to_read: '想读 · 等待启程' }
 function bookStatusText(s) { return BOOK_STATUS_TEXT[s] || s }
 
 function popupStyle() {
@@ -242,19 +242,69 @@ function popupStyle() {
 }
 
 let ro
-onMounted(async () => {
-  // 加载城市数据并初始化书架 store，再做容器测量（数据返回立即渲染，不闪烁）
-  const [c] = await Promise.all([getCities(), initBookshelf()])
-  cities.value = c
+const loadState = ref('loading') // 'loading' | 'ready' | 'error'
 
-  // 若从其他页面带来了定位请求（如作品详情页的"在地图中查看"），
-  // 数据就绪后重新触发一次，确保 watch 执行定位
-  if (mapStore.focusRequest) {
-    const req = mapStore.focusRequest
-    mapStore.focusRequest = null
-    await nextTick()
-    mapStore.focusRequest = req
+async function loadCities() {
+  loadState.value = 'loading'
+  try {
+    // 加载城市数据并初始化书架 store
+    const [c] = await Promise.all([getCities(), initBookshelf()])
+    cities.value = c
+    loadState.value = 'ready'
+    // 若从其他页面带来了定位请求（如作品详情页的"在地图中查看"），
+    // 数据就绪后重新触发一次，确保 watch 执行定位
+    if (mapStore.focusRequest) {
+      const req = mapStore.focusRequest
+      mapStore.focusRequest = null
+      await nextTick()
+      mapStore.focusRequest = req
+    }
+  } catch (e) {
+    // 真实模式后端不可达：显示错误并提供重试，不静默回退 Mock
+    loadState.value = 'error'
   }
+}
+
+// 城市弹窗的关联作品统一来源：Mock 取自作家作品表，真实模式取自地点关联作品接口
+function cityWorks(d) {
+  if (d.works && d.works.length) return d.works
+  const out = []
+  for (const a of d.authors || []) for (const w of a.works || []) out.push({ id: null, title: w })
+  return out
+}
+
+// ---------- 城市弹窗关联作品：按需加载 ----------
+// 地图初始化不再批量拉取各地点 /literature；弹窗打开时才请求单点，
+// 成功结果由 API 层缓存（重复打开同一城市不发请求）；失败展示可重试状态，不静默回退 Mock
+const litState = ref('idle') // 'idle' | 'loading' | 'ready' | 'error'（仅城市弹窗用）
+const litWorks = ref([])
+
+async function loadCityLiterature(d) {
+  // Mock 模式：关联作品已在城市数据内（authors[].works），无需请求
+  if (USE_MOCK) { litWorks.value = cityWorks(d); litState.value = 'ready'; return }
+  litState.value = 'loading'
+  litWorks.value = []
+  try {
+    litWorks.value = await getPlaceLiterature(d.id)
+    litState.value = 'ready'
+  } catch (e) {
+    litState.value = 'error'
+  }
+}
+
+function retryCityLiterature() {
+  if (selected.value) loadCityLiterature(selected.value.data)
+}
+
+watch(() => mapStore.selectedId, (id) => {
+  const m = id ? markers.value.find(x => x.id === id) : null
+  // 仅城市标记（总览模式 major/minor）需要按需加载关联作品；书籍标记不涉及
+  if (m && (m.kind === 'major' || m.kind === 'minor')) loadCityLiterature(m.data)
+  else { litState.value = 'idle'; litWorks.value = [] }
+})
+
+onMounted(() => {
+  loadCities()
   const measure = () => {
     if (wrapRef.value) {
       wrapSize.w = wrapRef.value.clientWidth
@@ -273,6 +323,13 @@ onBeforeUnmount(() => { if (ro) ro.disconnect() })
   <div class="map-wrap" ref="wrapRef" @wheel.prevent="onWheel">
     <!-- 星空背景（与预览一致的银河底图；原始素材 cosmos-bg.jpg 保留在 assets 中） -->
     <div class="starfield" aria-hidden="true" :style="{ backgroundImage: 'url(' + starfieldUrl + ')' }"></div>
+
+    <!-- 数据加载状态：加载中 / 加载失败（可重试），不静默使用空数据或 Mock -->
+    <div v-if="loadState === 'loading'" class="map-state">正在加载地图数据…</div>
+    <div v-else-if="loadState === 'error'" class="map-state map-state-err">
+      <span>地图数据加载失败，无法连接后端服务</span>
+      <button class="map-retry" @click="loadCities">重试</button>
+    </div>
 
     <!-- 地图 -->
     <svg class="map-svg" :viewBox="viewBox" preserveAspectRatio="xMidYMid meet"
@@ -356,11 +413,11 @@ onBeforeUnmount(() => { if (ro) ro.disconnect() })
           <div class="popup-top">
             <div class="popup-head">
               <p class="popup-city">{{ selected.data.city }}<span>{{ selected.data.country }}</span></p>
-              <p class="popup-summary">{{ selected.data.summary }}</p>
             </div>
           </div>
-          <p class="popup-genre">文学流派 · {{ selected.data.genre }}</p>
-          <div class="popup-auth-block">
+          <p v-if="selected.data.genre" class="popup-genre">文学流派 · {{ selected.data.genre }}</p>
+          <p class="popup-summary">{{ selected.data.summary || '这座城市暂无简介。' }}</p>
+          <div v-if="selected.data.authors && selected.data.authors.length" class="popup-auth-block">
             <p class="popup-section-title">代表作家</p>
             <div class="popup-auth-row">
               <span v-for="a in selected.data.authors.slice(0, 4)" :key="a.name" class="popup-author">
@@ -369,7 +426,13 @@ onBeforeUnmount(() => { if (ro) ro.disconnect() })
               </span>
             </div>
           </div>
-          <p class="popup-works">代表作品 · {{ selected.data.authors[0].works[0] }} 等</p>
+          <p v-if="litState === 'loading'" class="popup-works">正在加载关联作品…</p>
+          <p v-else-if="litState === 'error'" class="popup-works">
+            关联作品加载失败<button class="map-retry popup-retry" @click="retryCityLiterature">重试</button>
+          </p>
+          <p v-else-if="litWorks.length" class="popup-works">
+            关联作品 · {{ litWorks.slice(0, 3).map(w => w.title).join('、') }} 等
+          </p>
           <router-link class="popup-more" to="/works" @click="mapStore.selectedId = null">在阅读探索中查看 →</router-link>
         </template>
         <template v-else>
@@ -405,6 +468,22 @@ onBeforeUnmount(() => { if (ro) ro.disconnect() })
   background: #04070f;
 }
 .map-wrap:active { cursor: grabbing; }
+
+/* ---- 数据加载状态 ---- */
+.map-state {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  z-index: 30; display: flex; align-items: center; gap: 14px;
+  padding: 12px 22px; border-radius: 10px;
+  border: 1px solid rgba(212, 180, 119, .4); background: rgba(8, 14, 26, .92);
+  font-size: 14px; color: var(--ink); backdrop-filter: blur(6px);
+}
+.map-state-err { border-color: rgba(226, 136, 127, .5); color: #e2a49c; }
+.map-retry {
+  height: 30px; padding: 0 14px; font-size: 13px; cursor: pointer;
+  color: var(--accent-soft); background: transparent;
+  border: 1px solid rgba(212, 180, 119, .5); border-radius: 999px;
+}
+.map-retry:hover { background: rgba(212, 180, 119, .15); }
 
 /* ---- 宇宙背景素材（最底层，原图完整覆盖） ---- */
 .starfield {
@@ -494,9 +573,10 @@ onBeforeUnmount(() => { if (ro) ro.disconnect() })
 .marker.minor .halo { width: 12px; height: 12px; margin: -6px 0 0 -6px; }
 .marker.minor .ring { width: 12px; height: 12px; margin: -6px 0 0 -6px; }
 
-.marker.read { --core: #f2d9a4; --glow: rgba(160, 122, 62, .45); --halo: rgba(160, 122, 62, .32); }
+.marker.finished { --core: #f2d9a4; --glow: rgba(160, 122, 62, .45); --halo: rgba(160, 122, 62, .32); }
 .marker.reading { --core: #d7e8f8; --glow: rgba(146, 111, 58, .45); --halo: rgba(146, 111, 58, .32); }
 .marker.reading .core { animation: twinkle 2.4s ease-in-out infinite; }
+.marker.want_to_read { --core: #cdb4f2; --glow: rgba(146, 111, 58, .45); --halo: rgba(146, 111, 58, .32); }
 
 .marker.is-active .ring { animation: ripple 2s ease-out infinite; }
 .marker.is-active .halo { animation: pulse 2s ease-in-out infinite; }
@@ -556,6 +636,8 @@ onBeforeUnmount(() => { if (ro) ro.disconnect() })
 .av { width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #171006; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; font-family: Georgia, serif; flex-shrink: 0; }
 .av-name { font-size: 12px; color: var(--ink); white-space: nowrap; }
 .popup-works { font-size: 12px; color: var(--muted); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+/* 弹窗内联重试按钮：复用全局 map-retry 样式，仅收紧尺寸适配弹窗 */
+.popup-retry { height: 24px; padding: 0 10px; font-size: 12px; margin-left: 10px; }
 .popup-status { font-size: 13px; color: var(--accent-soft); margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
 .popup-more { display: inline-block; margin-top: 12px; font-size: 12px; color: var(--accent); }
 .popup-more:hover { color: var(--accent-soft); }

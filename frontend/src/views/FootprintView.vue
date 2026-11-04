@@ -1,55 +1,70 @@
 <script setup>
-// 我的阅读足迹页：只统计「已读」书籍，全部数据从 bookshelfStore 动态派生
-// - 在读 / 想读不计入足迹
-// - 城市与 26 城数据匹配成功的才提供"在世界地图中查看"入口，不编造关联
+// 我的阅读足迹页：只统计「已读」书籍
+// - 足迹数据统一来自 API 层 getFootprint()：
+//   真实模式 → GET /api/reading/footprint（后端只返回真实且坐标有效的地点）
+//   Mock 模式 → 由本地已读书派生（与真实接口同构）
+// - 在读 / 想读不计入足迹；虚构或无坐标地点不点亮地图
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { books, initBookshelf } from '../store/bookshelfStore'
+import { books, loading as shelfLoading, error as shelfError, initBookshelf, reloadBookshelf } from '../store/bookshelfStore'
 import { setMode, focusTarget } from '../store/mapStore'
-import { getCities, getWorks } from '../api'
+import { getFootprint, getWorks, READING_STATUS } from '../api'
 
 const router = useRouter()
-const allCities = ref([])   // 26 城文学城市库（用于城市匹配）
 const allWorks = ref([])    // 作品库（用于已读书 → 作品详情跳转）
+const footprint = ref([])   // 足迹城市列表（与真实接口同构：{ placeId, name, country, latitude, longitude, books }）
+const fpLoading = ref(false)
+const fpError = ref('')
 
-onMounted(async () => {
+async function loadFootprint() {
+  fpLoading.value = true
+  fpError.value = ''
+  try {
+    const data = await getFootprint()
+    footprint.value = data.items
+  } catch (e) {
+    // 真实模式后端不可达：展示错误并可重试，不静默回退 Mock
+    fpError.value = (e && e.message) || '足迹数据加载失败'
+  } finally {
+    fpLoading.value = false
+  }
+}
+
+onMounted(() => {
   initBookshelf() // 幂等：确保书架数据已加载
-  const [cities, works] = await Promise.all([getCities(), getWorks()])
-  allCities.value = cities
-  allWorks.value = works
+  loadFootprint()
+  getWorks().then(w => { allWorks.value = w }).catch(() => {})
 })
 
 // 已读作品列表（阅读足迹只看已读）
-const readBooks = computed(() => books.value.filter(b => b.status === 'read'))
+const readBooks = computed(() => books.value.filter(b => b.status === READING_STATUS.FINISHED))
 
-// 按"书籍自带的城市"分组：城市为空的书不参与分组，但仍计入已读数量
-// hit = 该城市能否匹配到 26 城数据（能匹配才有城市详情与地图定位入口）
-const cityGroups = computed(() => {
-  const map = new Map()
-  for (const b of readBooks.value) {
-    if (!b.city) continue
-    const key = b.city + '|' + (b.country || '')
-    if (!map.has(key)) {
-      const hit = allCities.value.find(c =>
-        c.city === b.city && (!b.country || c.country === b.country)
-      ) || null
-      map.set(key, { city: b.city, country: b.country || '', hit, books: [] })
-    }
-    map.get(key).books.push(b)
+// 城市足迹：过滤掉国家级地点（后端足迹接口可能返回国家本身，如"俄罗斯"），城市与国家概念分离
+const cityFootprint = computed(() => footprint.value.filter(i => i.placeType !== 'country'))
+
+// 涉及国家：国家级地点名称 + 各足迹条目的 country 字段，统一去重
+const countriesSet = computed(() => {
+  const s = new Set()
+  for (const i of footprint.value) {
+    if (i.placeType === 'country') { if (i.name) s.add(i.name) }
+    else if (i.country) s.add(i.country)
   }
-  return [...map.values()]
+  return s
 })
 
 // 统计卡：已读作品数 / 涉及城市数 / 涉及国家数（全部动态计算，无写死数字）
 const stats = computed(() => ({
   books: readBooks.value.length,
-  cities: cityGroups.value.length,
-  countries: new Set(readBooks.value.filter(b => b.country).map(b => b.country)).size
+  cities: cityFootprint.value.length,
+  countries: countriesSet.value.size
 }))
 
-// 已读书 → 作品库匹配：能匹配到的才可点击进入作品详情，其余纯文本展示
-function workOf(title) {
-  return allWorks.value.find(w => w.title === title) || null
+// 已读书 → 作品库匹配：优先按书名精确匹配，其次按后端作品 id（避免 Mock/真实 id 冲突）
+function workOf(b) {
+  const byTitle = allWorks.value.find(w => w.title === b.title)
+  if (byTitle) return byTitle
+  const id = b.bookId != null ? b.bookId : b.id
+  return id != null ? allWorks.value.find(w => String(w.id) === String(id)) || null : null
 }
 
 // 进入世界地图（个性化阅读地图模式）查看足迹：地图组件已有国家高亮与书籍标记
@@ -58,10 +73,10 @@ function viewOnMap() {
   router.push('/')
 }
 
-// 定位到已收录的文学城市：写入定位请求后回首页，由地图响应
-function focusCity(g) {
-  if (!g.hit) return
-  focusTarget('city', g.hit.id)
+// 定位到足迹城市：仅限有地图坐标且已收录的地点（placeId 为后端地点 id）
+function focusCity(it) {
+  if (it.placeId == null || it.latitude == null) return
+  focusTarget('city', it.placeId)
   router.push('/')
 }
 </script>
@@ -73,8 +88,19 @@ function focusCity(g) {
       <h1 class="page-title">我的阅读足迹</h1>
     </div>
 
+    <!-- 加载 / 错误状态 -->
+    <p v-if="fpLoading" class="fp-state">正在加载足迹数据…</p>
+    <div v-else-if="fpError" class="fp-state err">
+      <span>足迹数据加载失败：{{ fpError }}</span>
+      <button class="btn btn-ghost-dark btn-sm" @click="loadFootprint">重试</button>
+    </div>
+    <div v-else-if="shelfError && readBooks.length === 0" class="fp-state err">
+      <span>书架数据加载失败：{{ shelfError }}</span>
+      <button class="btn btn-ghost-dark btn-sm" @click="reloadBookshelf">重试</button>
+    </div>
+
     <!-- 空状态：没有已读作品时给出引导 -->
-    <div v-if="stats.books === 0" class="empty-box">
+    <div v-else-if="stats.books === 0" class="empty-box">
       <div class="empty-mark">✦</div>
       <p class="empty-text">书架里还没有「已读」的书。</p>
       <p class="empty-sub">把书的状态改为「已读」后，这里会自动生成你的阅读足迹。</p>
@@ -99,27 +125,27 @@ function focusCity(g) {
         <button class="btn btn-gold map-entry" @click="viewOnMap">在世界地图中查看足迹</button>
       </div>
 
-      <!-- 城市足迹：与 26 城数据匹配的城市才有详情与定位入口 -->
-      <section v-if="cityGroups.length > 0" class="section">
+      <!-- 城市足迹：只展示有真实坐标的地点（后端已过滤；Mock 同构）；国家级地点不混入城市列表 -->
+      <section v-if="cityFootprint.length > 0" class="section">
         <h2 class="section-title">到过的城市</h2>
         <div class="city-grid">
-          <div v-for="g in cityGroups" :key="g.city + g.country" class="city-card">
+          <div v-for="(it, idx) in cityFootprint" :key="(it.placeId ?? it.name) + '-' + idx" class="city-card">
             <div class="city-head">
-              <span class="city-name">{{ g.city }}</span>
-              <span class="city-country">{{ g.country }}</span>
+              <span class="city-name">{{ it.name }}</span>
+              <span v-if="it.country" class="city-country">{{ it.country }}</span>
             </div>
-            <template v-if="g.hit">
-              <p class="city-genre">{{ g.hit.genre }}</p>
-              <p class="city-summary">{{ g.hit.summary }}</p>
-              <button class="btn btn-ghost-dark btn-sm" @click="focusCity(g)">在世界地图中查看</button>
-            </template>
-            <p v-else class="city-miss">暂未收录为城市</p>
+            <button
+              v-if="it.placeId != null && it.latitude != null"
+              class="btn btn-ghost-dark btn-sm"
+              @click="focusCity(it)"
+            >在世界地图中查看</button>
+            <p v-else class="city-miss">暂无地图坐标</p>
             <div class="city-books">
-              <template v-for="b in g.books" :key="b.id">
-                <router-link v-if="workOf(b.title)" :to="`/works/${workOf(b.title).id}`" class="book-chip link">
-                  {{ b.title }}
+              <template v-for="bk in it.books" :key="bk.id ?? bk.title">
+                <router-link v-if="workOf(bk)" :to="`/works/${workOf(bk).id}`" class="book-chip link">
+                  {{ bk.title }}
                 </router-link>
-                <span v-else class="book-chip">{{ b.title }}</span>
+                <span v-else class="book-chip">{{ bk.title }}</span>
               </template>
             </div>
           </div>
@@ -131,11 +157,11 @@ function focusCity(g) {
         <h2 class="section-title">已读作品</h2>
         <ul class="read-list">
           <li v-for="b in readBooks" :key="b.id" class="read-row">
-            <router-link v-if="workOf(b.title)" :to="`/works/${workOf(b.title).id}`" class="read-title link">
+            <router-link v-if="workOf(b)" :to="`/works/${workOf(b).id}`" class="read-title link">
               {{ b.title }}
             </router-link>
             <span v-else class="read-title">{{ b.title }}</span>
-            <span class="read-author">{{ b.author }}</span>
+            <span class="read-author">{{ b.author || '作者未知' }}</span>
             <span v-if="b.city" class="read-place">{{ b.city }} · {{ b.country }}</span>
             <span v-else class="read-place miss">暂无城市关联</span>
           </li>
@@ -147,6 +173,8 @@ function focusCity(g) {
 
 <style scoped>
 /* 空状态 */
+.fp-state { margin-top: 30px; padding: 24px; text-align: center; color: var(--muted); font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.fp-state.err { color: #e2a49c; }
 .empty-box {
   margin-top: 30px; padding: 48px 20px; text-align: center;
   border: 1px dashed rgba(212, 180, 119, .35); border-radius: 12px;

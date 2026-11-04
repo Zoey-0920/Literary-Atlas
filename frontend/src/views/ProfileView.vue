@@ -5,9 +5,9 @@
 // - 用户资料来自 profileStore（localStorage 持久化，演示资料，非真实登录用户）
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { books, initBookshelf } from '../store/bookshelfStore'
+import { books, shelfStats, statsError, initBookshelf } from '../store/bookshelfStore'
 import { profile, initProfile, updateProfile, AVATARS } from '../store/profileStore'
-import { countShelfStats, getCities } from '../api'
+import { getCities } from '../api'
 
 // 预设头像的简笔画图形（金色线条 + 深蓝底，主题：阅读与世界）
 // 统一 64x64 视图，linecap 圆角，保持同一套线宽与视觉风格
@@ -36,7 +36,7 @@ const totalCities = ref(0)          // 全站文学城市总量（展示用）
 onMounted(() => {
   initBookshelf()
   initProfile()
-  getCities().then(cs => { totalCities.value = cs.length })
+  getCities().then(cs => { totalCities.value = cs.length }).catch(() => {})
 })
 
 // 进入编辑态：把当前资料拷贝进草稿
@@ -62,16 +62,18 @@ function cancelEdit() {
   errText.value = ''
 }
 
-// ── 阅读统计：全部动态计算，禁止写死 ──
+// ── 阅读统计：状态计数走后端 GET /api/reading/statistics（store 统一管理，失败保留最近一次有效值）；
+//    城市 / 国家数量与阅读足迹页同一套派生逻辑（后端统计无此字段，由已读书去重计算）──
 const stats = computed(() => {
-  const byStatus = countShelfStats(books.value)
-  const read = books.value.filter(b => b.status === 'read')
+  const read = books.value.filter(b => b.status === 'finished')
   // 与阅读足迹页一致的派生方式：城市按 书名+国家 去重，国家去重
   const cities = new Set(read.filter(b => b.city).map(b => b.city + '|' + (b.country || ''))).size
   const countries = new Set(read.filter(b => b.country).map(b => b.country)).size
   return {
-    total: books.value.length,
-    ...byStatus,          // read / reading / want
+    total: shelfStats.value.total,
+    finished: shelfStats.value.finished,   // finished / reading / want_to_read（与后端状态值一致）
+    reading: shelfStats.value.reading,
+    want_to_read: shelfStats.value.want_to_read,
     cities,
     countries
   }
@@ -80,9 +82,9 @@ const stats = computed(() => {
 // 统计卡定义：to 为空表示不跳转
 const STAT_CARDS = [
   { key: 'total', label: '总藏书', to: '/bookshelf' },
-  { key: 'read', label: '已读', to: '/bookshelf' },
+  { key: 'finished', label: '已读', to: '/bookshelf' },
   { key: 'reading', label: '在读', to: '/bookshelf' },
-  { key: 'want', label: '想读', to: '/bookshelf' },
+  { key: 'want_to_read', label: '想读', to: '/bookshelf' },
   { key: 'cities', label: '涉及城市', to: '/footprint' },
   { key: 'countries', label: '涉及国家', to: '/footprint' }
 ]
@@ -147,9 +149,10 @@ const QUICK_LINKS = [
       </div>
     </div>
 
-    <!-- 阅读统计：动态计算；书架类跳 /bookshelf，足迹类跳 /footprint -->
+    <!-- 阅读统计：状态计数来自后端 /api/reading/statistics；城市/国家由已读书派生 -->
     <section class="section">
       <h2 class="section-title">阅读概况</h2>
+      <p v-if="statsError" class="stats-warn">统计暂时不可用（显示最近一次结果）：{{ statsError }}</p>
       <div class="stat-grid">
         <component
           v-for="c in STAT_CARDS" :key="c.key"
@@ -228,6 +231,7 @@ const QUICK_LINKS = [
 /* 分区与统计 */
 .section { margin-top: 30px; }
 .section-title { font-size: 14px; color: var(--muted); letter-spacing: .08em; margin-bottom: 12px; }
+.stats-warn { margin: -6px 0 10px; font-size: 12px; color: #C9AB72; opacity: .85; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
 .stat-card {
   padding: 16px; text-align: center; text-decoration: none;

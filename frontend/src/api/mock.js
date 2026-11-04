@@ -221,12 +221,12 @@ export const literaryCities = [
 ]
 
 /* =========================================================
-   阅读书架：已读 / 在读
+   阅读书架：状态值与后端一致（want_to_read / reading / finished）
    cover 为封面渐变色（演示数据，明确标记）
    ========================================================= */
 export const shelfBooks = [
   {
-    id: 1, title: '百年孤独', author: '加西亚·马尔克斯', status: 'read',
+    id: 1, title: '百年孤独', author: '加西亚·马尔克斯', status: 'finished',
     city: '阿拉卡塔卡', country: '哥伦比亚', countryCode: 'COL', lat: 10.59, lng: -74.19,
     cover: ['#8a7b3a', '#3c2a1c']
   },
@@ -236,24 +236,28 @@ export const shelfBooks = [
     cover: ['#3a6b9d', '#c9843a']
   },
   {
-    id: 3, title: '1984', author: '乔治·奥威尔', status: 'read',
+    id: 3, title: '1984', author: '乔治·奥威尔', status: 'finished',
     city: '伦敦', country: '英国', countryCode: 'GBR', lat: 51.5074, lng: -0.1278,
     cover: ['#6e1f22', '#2a2a33']
   },
   {
-    id: 4, title: '小王子', author: '安托万·德·圣埃克苏佩里', status: 'read',
+    id: 4, title: '小王子', author: '安托万·德·圣埃克苏佩里', status: 'finished',
     city: '巴黎', country: '法国', countryCode: 'FRA', lat: 48.8566, lng: 2.3522,
     cover: ['#2a5d8a', '#8ecfe0']
   },
   {
-    id: 5, title: '月亮与六便士', author: '毛姆', status: 'read',
+    id: 5, title: '月亮与六便士', author: '毛姆', status: 'want_to_read',
     city: '伦敦', country: '英国', countryCode: 'GBR', lat: 51.5074, lng: -0.1278,
     cover: ['#1c2340', '#d4b477']
   }
 ]
 
 // 书架统计（演示数据：列表仅展示部分，总量见此处）
-export const shelfStats = { read: 12, reading: 3 }
+/* =========================================================
+   遗留演示统计（当前 API 层不再读取，仅为旧引用兼容保留）
+   状态键已与后端枚举对齐：finished / reading / want_to_read
+   ========================================================= */
+export const shelfStats = { finished: 12, reading: 3, want_to_read: 5 }
 
 /* 原有演示数据（作品 / 作家列表向后兼容） */
 export const mockBooks = [
