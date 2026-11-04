@@ -7,6 +7,7 @@
 // =============================================================
 import { ref } from 'vue'
 import { getShelfBooks } from '../api'
+import { literaryCities } from '../api/mock'
 
 const STORAGE_KEY = 'literary-atlas-bookshelf'
 
@@ -31,6 +32,47 @@ function readCache() {
   } catch (e) { return null }
 }
 
+// ---------- 书目地理位置自动匹配 ----------
+// 索引：作品名 → 收录城市（含作者名 → 城市作后备）。数据来自 literaryCities 的作家作品表
+const WORK_CITY_INDEX = (() => {
+  const m = new Map()
+  for (const c of literaryCities) {
+    for (const a of c.authors || []) {
+      for (const w of a.works || []) if (!m.has(w)) m.set(w, c)
+      if (a.name && !m.has(a.name)) m.set(a.name, c)
+    }
+  }
+  return m
+})()
+
+/**
+ * 补全书籍地理位置：手动添加 / 导入的书往往只有书名作者，
+ * 按书名（其次作者名）关联到收录城市后补齐经纬度与国家码，
+ * 使个性化地图能点亮对应国家并显示城市灯光。以后新增已读书目同样自动生效。
+ */
+function enrichLocation(b) {
+  if (b.lat != null && b.lng != null && b.countryCode) return b
+  const hit = WORK_CITY_INDEX.get(b.title) || WORK_CITY_INDEX.get(b.author)
+  if (!hit) return b
+  if (b.city == null || b.city === '') b.city = hit.city
+  if (b.country == null || b.country === '') b.country = hit.country
+  if (b.countryCode == null || b.countryCode === '') b.countryCode = hit.countryCode
+  if (b.lat == null) b.lat = hit.lat
+  if (b.lng == null) b.lng = hit.lng
+  return b
+}
+
+// 对整份书架做一次地理补全（幂等，改动后写回缓存）
+function enrichAll() {
+  let changed = false
+  for (const b of books.value) {
+    const before = JSON.stringify([b.city, b.country, b.countryCode, b.lat, b.lng])
+    enrichLocation(b)
+    if (JSON.stringify([b.city, b.country, b.countryCode, b.lat, b.lng]) !== before) changed = true
+  }
+  if (changed) persist()
+}
+
 // 把当前书架写入 localStorage（保存失败不影响内存数据）
 function persist() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(books.value)) } catch (e) { /* 忽略 */ }
@@ -43,18 +85,21 @@ function persist() {
 export async function initBookshelf() {
   if (inited) return
   books.value = readCache() || (await getShelfBooks())
+  enrichAll()
   inited = true
 }
 
 /** 添加书籍（书名 / 作者 / 阅读状态） */
 export function addBook({ title, author, status }) {
   const id = Date.now()
-  books.value.push({
+  const book = {
     id, title, author, status,
     cover: FALLBACK_COVERS[title.length % FALLBACK_COVERS.length],
-    // 手动添加的书暂无地理位置：不参与个人地图标记与定位（地图组件已做兼容）
+    // 手动添加的书暂无地理位置：由 enrichLocation 按书名/作者自动匹配收录城市
     city: '', country: '', countryCode: '', lat: null, lng: null
-  })
+  }
+  enrichLocation(book)
+  books.value.push(book)
   persist()
 }
 
