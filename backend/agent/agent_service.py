@@ -19,6 +19,7 @@ from agent.tools import (
     get_reading_records,
     get_reading_statistics,
     list_books,
+    search_authors,
     search_books,
     search_places,
 )
@@ -39,7 +40,13 @@ _SYSTEM_PROMPT = (
     "规则：1) 涉及具体作品、作者、地点、阅读记录时先调用工具查询数据库，再据实回答；"
     "2) 已获得足够信息后直接给出最终回答，不要反复调用同一个工具；"
     "3) 推荐作品必须来自数据库真实存在的作品，不要虚构；"
-    "4) 数据库没有的信息不要编造，可如实说明不确定。"
+    "4) 数据库没有的信息不要编造，可如实说明不确定；"
+    "5) 搜索工具支持不完整书名、部分作者名、地点/国家/流派关键词、英文大小写"
+    "不敏感及少量拼写容错；结果按相关度排序并带 match_type 字段："
+    "exact/prefix/contains/token 表示确定级命中，fuzzy 表示近似匹配（可能是用户"
+    "输入有误的候选）。仅当存在确定级命中且能明确对应用户所指时，才把它当作"
+    "确定的作品/作者信息；若只有 fuzzy 匹配或多个候选，应向用户列出候选并请其"
+    "确认，绝不能把模糊匹配结果当成用户确定指代的作品。"
 )
 
 # ---------- 1. 工具注册（OpenAI tools 格式，参数定义与真实函数一致） ----------
@@ -49,11 +56,45 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "search_books",
-            "description": "根据书名关键词模糊搜索文学作品，返回作品 ID、书名、原名、语言、出版年份。",
+            "description": (
+                "模糊搜索文学作品。匹配书名、原名、作者姓名、文学流派名；"
+                "支持不完整书名、部分作者名、英文大小写不敏感及少量拼写容错。"
+                "返回作品 ID、书名、原名、语言、出版年份、作者、流派、match_type。"
+                "结果按相关度排序：match_type 为 exact/prefix/contains/token 表示"
+                "确定级命中，fuzzy 表示近似匹配（仅作候选，需用户确认）。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "keyword": {"type": "string", "description": "书名关键词"},
+                    "keyword": {
+                        "type": "string",
+                        "description": "书名/作者名/流派名关键词，可以是不完整片段",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回条数上限，默认 5，最大 20",
+                    },
+                },
+                "required": ["keyword"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_authors",
+            "description": (
+                "模糊搜索作家。匹配作者姓名、国籍；支持不完整姓名、"
+                "英文大小写不敏感及少量拼写容错。返回作者 ID、姓名、国籍、"
+                "其作品名列表、match_type。结果按相关度排序，fuzzy 为近似候选。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keyword": {
+                        "type": "string",
+                        "description": "作者姓名或国籍关键词，可以是不完整片段",
+                    },
                     "limit": {
                         "type": "integer",
                         "description": "返回条数上限，默认 5，最大 20",
@@ -88,11 +129,19 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "search_places",
-            "description": "根据地点名称关键词模糊搜索地点，返回地点 ID、名称、类型、是否虚构、国家、地区。",
+            "description": (
+                "模糊搜索地点。匹配地点名称、所属国家、所属区域；"
+                "支持不完整名称、英文大小写不敏感及少量拼写容错。"
+                "返回地点 ID、名称、类型、是否虚构、国家、地区、match_type。"
+                "结果按相关度排序，fuzzy 为近似候选。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "keyword": {"type": "string", "description": "地点名称关键词"},
+                    "keyword": {
+                        "type": "string",
+                        "description": "地点/国家/区域名称关键词，可以是不完整片段",
+                    },
                     "limit": {
                         "type": "integer",
                         "description": "返回条数上限，默认 5，最大 20",
@@ -146,6 +195,7 @@ TOOL_DEFINITIONS = [
 # 工具名称 -> 实际 Python 函数（白名单，仅允许调用这些）
 TOOL_HANDLERS = {
     "search_books": search_books,
+    "search_authors": search_authors,
     "list_books": list_books,
     "search_places": search_places,
     "get_book_detail": get_book_detail,

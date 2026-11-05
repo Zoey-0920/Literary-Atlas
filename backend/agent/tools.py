@@ -1,9 +1,10 @@
 """Literary Atlas Agent 数据库查询工具。
 
 提供只读的数据库查询能力，供大模型（Agent）调用：
-- search_books        : 按书名关键词模糊搜索作品
+- search_books        : 模糊搜索作品（书名/原名/作者名/流派名，含拼写容错）
+- search_authors      : 模糊搜索作者（姓名/国籍，含拼写容错）
 - list_books          : 列出数据库中的全部作品（用于推荐 / 浏览）
-- search_places       : 按地点名关键词模糊搜索地点
+- search_places       : 模糊搜索地点（名称/国家/区域，含拼写容错）
 - get_book_detail     : 按作品 ID 查询详情（关联作者、地点、流派）
 - get_reading_records : 查询演示用户的个人阅读记录
 - get_reading_statistics: 统计演示用户的阅读记录（在读/想读/读完）
@@ -13,10 +14,19 @@
 - 所有 SQL 均使用参数化占位符，杜绝拼接用户输入。
 - 数据库连接统一复用 database.py 的 get_db_connection()。
 - 阅读工具只读取 config.DEMO_USER_ID 的记录，保证用户隔离。
+- 模糊匹配统一复用 search_engine.py（与全站搜索同一套逻辑），
+  结果按相关度排序并携带 match_type，供模型区分确定命中与近似候选。
 """
 
 from config import DEMO_USER_ID
 from database import get_db_connection
+
+# 统一模糊检索引擎（只读，复用现有数据库）
+from search_engine import (
+    search_authors_fuzzy,
+    search_books_fuzzy,
+    search_places_fuzzy,
+)
 
 # 搜索结果默认返回条数，以及上限（避免一次返回过多数据）
 _DEFAULT_LIMIT = 5
@@ -44,14 +54,6 @@ def _row_to_dict(row) -> dict:
     return {key: row[key] for key in row.keys()}
 
 
-def _normalize_keyword(keyword: str) -> str | None:
-    """清洗关键词；为空或纯空白时返回 None。"""
-    if keyword is None:
-        return None
-    kw = keyword.strip()
-    return kw if kw else None
-
-
 def _normalize_limit(limit: int | None) -> int:
     """把 limit 钳制到 [1, _MAX_LIMIT] 区间。"""
     if limit is None:
@@ -59,50 +61,50 @@ def _normalize_limit(limit: int | None) -> int:
     return max(1, min(int(limit), _MAX_LIMIT))
 
 
-# ---------- 1. 按书名关键词搜索作品 ----------
+# ---------- 1. 模糊搜索作品 ----------
 
 def search_books(keyword: str, limit: int | None = None) -> dict:
-    """按作品名称关键词模糊搜索文学作品。
+    """模糊搜索文学作品（统一模糊检索引擎）。
+
+    匹配范围：书名、原名、作者姓名、文学流派名；
+    支持不完整书名、部分作者名、英文大小写不敏感与少量拼写容错。
 
     参数：
-        keyword: 书名关键词（必填）。
+        keyword: 关键词（必填，可以是书名片段 / 作者名片段 / 流派名）。
         limit  : 返回条数上限，默认 5，最大 20。
 
     返回：
-        {"total": 匹配总数, "items": [作品概要, ...]}
-        作品概要包含：id、title、original_title、language、publication_year。
+        {"total": 匹配总数, "exact_match_exists": 是否存在确定级命中,
+         "items": [作品概要, ...]}
+        作品概要包含：id、title、original_title、language、publication_year、
+        author_names、genre_names、match_type、matched_by。
+        结果按相关度排序：精确 > 前缀 > 包含 > 分词 > 容错；
+        match_type=fuzzy 表示近似匹配（可能是用户拼错的候选），不能当作确定结论。
     """
-    kw = _normalize_keyword(keyword)
-    if kw is None:
-        # 空关键词：不执行 LIKE '%%' 全表返回
-        return {"total": 0, "items": []}
-
-    limit = _normalize_limit(limit)
-    like = f"%{kw}%"
-
-    conn = get_db_connection()
-    try:
-        total = conn.execute(
-            "SELECT COUNT(*) AS c FROM books WHERE title LIKE ?", (like,)
-        ).fetchone()["c"]
-        rows = conn.execute(
-            """
-            SELECT id, title, original_title, language, publication_year
-            FROM books
-            WHERE title LIKE ?
-            ORDER BY id ASC
-            LIMIT ?
-            """,
-            (like, limit),
-        ).fetchall()
-    finally:
-        conn.close()
-
-    items = [_row_to_dict(r) for r in rows]
-    return {"total": total, "items": items}
+    return search_books_fuzzy(keyword, limit=_normalize_limit(limit))
 
 
-# ---------- 1b. 列出全部作品 ----------
+# ---------- 1b. 模糊搜索作者 ----------
+
+def search_authors(keyword: str, limit: int | None = None) -> dict:
+    """模糊搜索作家（统一模糊检索引擎）。
+
+    匹配范围：作者姓名、国籍；支持不完整姓名、英文大小写不敏感与少量拼写容错。
+
+    参数：
+        keyword: 关键词（必填）。
+        limit  : 返回条数上限，默认 5，最大 20。
+
+    返回：
+        {"total": 匹配总数, "exact_match_exists": 是否存在确定级命中,
+         "items": [作者概要, ...]}
+        作者概要包含：id、name、nationality、work_titles（其作品名）、
+        match_type、matched_by。
+    """
+    return search_authors_fuzzy(keyword, limit=_normalize_limit(limit))
+
+
+# ---------- 1c. 列出全部作品 ----------
 
 def list_books(limit: int | None = None, offset: int = 0) -> dict:
     """列出数据库中的作品，用于推荐或浏览全部作品。
@@ -136,47 +138,27 @@ def list_books(limit: int | None = None, offset: int = 0) -> dict:
     return {"total": total, "items": items}
 
 
-# ---------- 2. 按地点名关键词搜索地点 ----------
+# ---------- 2. 模糊搜索地点 ----------
 
 def search_places(keyword: str, limit: int | None = None) -> dict:
-    """按地点名称关键词模糊搜索地点。
+    """模糊搜索地点（统一模糊检索引擎）。
+
+    匹配范围：地点名称、所属国家、所属区域；
+    支持不完整名称、英文大小写不敏感与少量拼写容错。
 
     参数：
         keyword: 地点名关键词（必填）。
         limit  : 返回条数上限，默认 5，最大 20。
 
     返回：
-        {"total": 匹配总数, "items": [地点概要, ...]}
-        地点概要包含：id、name、place_type、is_fictional、country、region。
-        保留 is_fictional 与 place_type，便于区分虚构地点与现实地点。
+        {"total": 匹配总数, "exact_match_exists": 是否存在确定级命中,
+         "items": [地点概要, ...]}
+        地点概要包含：id、name、place_type、is_fictional、country、region、
+        match_type、matched_by。
+        保留 is_fictional 与 place_type，便于区分虚构地点与现实地点；
+        match_type=fuzzy 表示近似匹配（候选），不能当作确定结论。
     """
-    kw = _normalize_keyword(keyword)
-    if kw is None:
-        return {"total": 0, "items": []}
-
-    limit = _normalize_limit(limit)
-    like = f"%{kw}%"
-
-    conn = get_db_connection()
-    try:
-        total = conn.execute(
-            "SELECT COUNT(*) AS c FROM places WHERE name LIKE ?", (like,)
-        ).fetchone()["c"]
-        rows = conn.execute(
-            """
-            SELECT id, name, place_type, is_fictional, country, region
-            FROM places
-            WHERE name LIKE ?
-            ORDER BY id ASC
-            LIMIT ?
-            """,
-            (like, limit),
-        ).fetchall()
-    finally:
-        conn.close()
-
-    items = [_row_to_dict(r) for r in rows]
-    return {"total": total, "items": items}
+    return search_places_fuzzy(keyword, limit=_normalize_limit(limit))
 
 
 # ---------- 3. 按作品 ID 查询详情 ----------

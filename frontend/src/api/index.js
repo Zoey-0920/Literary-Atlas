@@ -585,12 +585,20 @@ export function countShelfStats(books) {
 }
 
 /**
- * 搜索文学相关内容（导航栏分类搜索）
- * 真实模式：作品走 /api/books?keyword=，城市/国家走 /api/places?keyword=
- * （接口暂无作者搜索能力，真实模式不返回作家分类，不编造数据）
+ * 清洗搜索关键词：去首尾空格、连续空白合并为单个空格（与后端归一化规则一致）
+ */
+export function normalizeSearchKeyword(keyword) {
+  return (keyword || '').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * 搜索文学相关内容（导航栏分类搜索，统一模糊检索）
+ * 真实模式：GET /api/search?q= —— 后端统一模糊搜索作品/作者/地点/国家/文学流派，
+ *           返回分组结果（含相关度排序与少量拼写容错，容错为兜底策略）
+ * Mock 模式：在本地演示数据上做包含匹配（大小写不敏感），不编造数据
  */
 export async function searchLiterature(keyword) {
-  const q = (keyword || '').trim()
+  const q = normalizeSearchKeyword(keyword)
   if (!q) return []
   if (USE_MOCK) {
     const lq = q.toLowerCase()
@@ -616,27 +624,52 @@ export async function searchLiterature(keyword) {
     return flat.slice(0, 10)
   }
 
-  // 真实模式
-  const [booksRes, placesRes] = await Promise.all([
-    request(`/api/books${qs({ keyword: q, limit: 10 })}`).catch(() => ({ items: [] })),
-    request(`/api/places${qs({ keyword: q, limit: 10 })}`).catch(() => ({ items: [] }))
-  ])
-  const cities = (placesRes.items || []).map(p => ({ id: 'plc-' + p.id, title: p.name, sub: p.country || '', cityId: p.id }))
-  const seenCountry = new Set()
-  const countries = []
-  for (const p of placesRes.items || []) {
-    if (p.country && !seenCountry.has(p.country)) {
-      seenCountry.add(p.country)
-      countries.push({ id: 'cty-' + p.id, title: p.country, sub: '地点 · ' + p.name, cityId: p.id })
-    }
-  }
-  const works = (booksRes.items || []).map(b => ({ id: 'book-' + b.id, title: b.title, sub: b.original_title || b.language || '', bookId: b.id }))
+  // 真实模式：统一模糊搜索接口（作品/作者/地点/国家/流派一次返回）
+  const res = await request(`/api/search${qs({ q, per_group: 5 })}`).catch(() => null)
+  if (!res || !res.groups) return []
+  const g = res.groups
   const flat = []
-  const order = [['城市', cities], ['国家', countries], ['作品', works]]
-  for (const [cat, arr] of order) {
-    for (const it of arr.slice(0, 4)) flat.push({ ...it, cat })
+
+  // 城市/地点（国家类型的地点已由后端归入 countries 分组）
+  for (const p of (g.places || []).slice(0, 3)) {
+    const subParts = [p.country, p.region].filter(Boolean)
+    if (p.is_fictional) subParts.unshift('虚构地点')
+    flat.push({ id: 'plc-' + p.id, title: p.name, sub: subParts.join(' · '), cityId: p.id, cat: '城市' })
   }
-  return flat.slice(0, 10)
+  // 国家（有 place_id 可定位地图；否则点击进入作品页按国家筛选）
+  for (const c of (g.countries || []).slice(0, 2)) {
+    flat.push({
+      id: 'cty-' + (c.place_id ?? c.name),
+      title: c.name,
+      sub: (c.work_count ? c.work_count + ' 部相关作品' : '国家'),
+      cityId: c.place_id ?? undefined,
+      countryName: c.place_id ? undefined : c.name,
+      cat: '国家'
+    })
+  }
+  // 作家（点击进入作家详情页）
+  for (const a of (g.authors || []).slice(0, 2)) {
+    flat.push({
+      id: 'au-' + a.id,
+      title: a.name,
+      sub: [a.nationality, (a.work_titles || []).slice(0, 2).join(' · ')].filter(Boolean).join(' · '),
+      authorId: a.id,
+      cat: '作家'
+    })
+  }
+  // 作品（点击定位地图上的作品）
+  for (const w of (g.works || []).slice(0, 3)) {
+    flat.push({ id: 'book-' + w.id, title: w.title, sub: (w.authors || []).join(' · '), bookId: w.id, cat: '作品' })
+  }
+  // 文学类型（点击进入作品页按类型筛选）
+  for (const ge of (g.genres || []).slice(0, 2)) {
+    flat.push({ id: 'gn-' + ge.id, title: ge.name, sub: ge.work_count + ' 部作品', genreName: ge.name, cat: '类型' })
+  }
+  // 标记是否为容错兜底结果（供界面提示"已近似匹配"）
+  if (res.fuzzy_fallback) {
+    for (const it of flat) it.fuzzyFallback = true
+  }
+  return flat.slice(0, 12)
 }
 
 /**

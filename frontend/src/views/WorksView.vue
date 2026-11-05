@@ -1,10 +1,11 @@
 <script setup>
 // 作品浏览页：展示作品列表，支持按名称搜索、按国家/流派筛选，点击进入详情
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { getWorks } from '../api'
 import AddBookModal from '../components/AddBookModal.vue'
 
+const route = useRoute()
 const router = useRouter()
 
 // 「添加书籍」弹窗开关（AI 辅助自主添加，保存成功后刷新列表）
@@ -20,11 +21,24 @@ function onAddClosed() {
 const allWorks = ref([])
 const loading = ref(false)
 const error = ref('')
+
+// 全站搜索跳转预置筛选（?genre=流派名 / ?country=国家名），数据就绪后只应用一次
+const pendingQueryFilters = ref(true)
+function applyQueryFilters() {
+  if (!pendingQueryFilters.value) return
+  pendingQueryFilters.value = false
+  const qg = (route.query.genre || '').toString().trim().toLowerCase()
+  const qc = (route.query.country || '').toString().trim().toLowerCase()
+  if (qg) genreFilter.value = genres.value.find(g => g.toLowerCase() === qg) || 'all'
+  if (qc) countryFilter.value = countries.value.find(c => c.toLowerCase() === qc) || 'all'
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
     allWorks.value = await getWorks()
+    applyQueryFilters()
   } catch (e) {
     // 真实模式后端不可达：展示错误并提供重试，不静默回退 Mock
     error.value = (e && e.message) || '作品列表加载失败'

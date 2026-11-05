@@ -1,22 +1,58 @@
 <script setup>
 // 顶部融合层：品牌名 + 地图模式切换 + 分类搜索 + 用户头像（悬浮于地图之上）
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { mapStore, setMode, focusTarget } from '../store/mapStore'
-import { searchLiterature } from '../api'
+import { searchLiterature, normalizeSearchKeyword } from '../api'
 
+const router = useRouter()
 const query = ref('')
 const menuOpen = ref(false)
 
-// 分类搜索：城市 / 国家 / 作家 / 作品（数据经 API 层异步搜索，当前 API 层内部读 mock）
+// 统一模糊搜索：作品 / 作家 / 城市 / 国家 / 文学类型
+// 250ms 防抖 + 请求序号防竞态（旧请求晚到不会覆盖新结果）
 const results = ref([])
-watch(query, async (q) => {
-  results.value = await searchLiterature(q)
+const searching = ref(false)
+const noResults = ref(false)
+const fuzzyFallback = ref(false)
+const cleanedQuery = computed(() => normalizeSearchKeyword(query.value))
+
+let searchTimer = null
+let searchSeq = 0
+
+watch(query, (q) => {
+  const cleaned = normalizeSearchKeyword(q)
+  clearTimeout(searchTimer)
+  if (!cleaned) {
+    searchSeq++
+    searching.value = false
+    results.value = []
+    noResults.value = false
+    fuzzyFallback.value = false
+    return
+  }
+  searching.value = true
+  searchTimer = setTimeout(async () => {
+    const seq = ++searchSeq
+    try {
+      const r = await searchLiterature(cleaned)
+      if (seq !== searchSeq) return // 已有更新的搜索，丢弃过期结果
+      results.value = r
+      fuzzyFallback.value = !!(r.length && r[0].fuzzyFallback)
+      noResults.value = r.length === 0
+    } finally {
+      if (seq === searchSeq) searching.value = false
+    }
+  }, 250)
 })
 
 function choose(r) {
   query.value = ''
   if (r.bookId) focusTarget('book', r.bookId)
-  else focusTarget('city', r.cityId)
+  else if (r.cityId) focusTarget('city', r.cityId)
+  else if (r.authorId) router.push(`/authors/${r.authorId}`)
+  else if (r.genreName) router.push({ path: '/works', query: { genre: r.genreName } })
+  else if (r.countryName) router.push({ path: '/works', query: { country: r.countryName } })
 }
 </script>
 
@@ -49,16 +85,20 @@ function choose(r) {
 
     <div class="search">
       <svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
-      <input v-model="query" type="text" placeholder="搜索作品、作家、国家或城市…" />
+      <input v-model="query" type="text" placeholder="搜索作品、作家、类型、国家或城市…" />
       <span class="search-divider" aria-hidden="true"></span>
       <svg class="search-star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.6 7.4L22 12l-7.4 2.6L12 22l-2.6-7.4L2 12l7.4-2.6z" /></svg>
       <transition name="drop">
         <ul v-if="results.length" class="search-results">
+          <li v-if="fuzzyFallback" class="sr-hint" @mousedown.prevent>未找到完全匹配，以下为近似结果</li>
           <li v-for="r in results" :key="r.cat + r.id" @mousedown.prevent="choose(r)">
             <span class="sr-type">{{ r.cat }}</span>
             <span class="sr-title">{{ r.title }}</span>
             <span class="sr-sub">{{ r.sub }}</span>
           </li>
+        </ul>
+        <ul v-else-if="cleanedQuery && !searching && noResults" class="search-results">
+          <li class="sr-hint" @mousedown.prevent>未找到与「{{ cleanedQuery }}」相关的内容，换个关键词试试</li>
         </ul>
       </transition>
     </div>
@@ -116,6 +156,8 @@ function choose(r) {
 .search-results { position: absolute; top: 44px; left: 0; right: 0; background: var(--bg-card); border: 1px solid var(--line); border-radius: 10px; list-style: none; max-height: 360px; overflow: auto; z-index: 60; box-shadow: 0 18px 50px rgba(0, 0, 0, .55); }
 .search-results li { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; }
 .search-results li:hover { background: rgba(212, 180, 119, .1); }
+.sr-hint { font-size: 12px; color: var(--muted); cursor: default; }
+.sr-hint:hover { background: none; }
 .sr-type { font-size: 11px; color: var(--accent); border: 1px solid var(--line); padding: 1px 6px; border-radius: 6px; flex-shrink: 0; }
 .sr-title { font-size: 14px; color: var(--ink); }
 .sr-sub { font-size: 12px; color: var(--muted); margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -715,12 +715,19 @@ Agent 会按需调用以下只读工具查询数据库后再组织回答，不�
 
 | 工具名 | 用途 |
 |--------|------|
-| search_books | 按书名关键词模糊搜索作品 |
+| search_books | 模糊搜索作品（书名 / 原名 / 作者姓名 / 文学流派，支持不完整输入与少量拼写容错） |
+| search_authors | 模糊搜索作者（姓名 / 国籍，支持不完整输入与少量拼写容错） |
 | list_books | 列出数据库中的全部作品（用于推荐 / 浏览） |
-| search_places | 按地点名关键词模糊搜索地点 |
+| search_places | 模糊搜索地点（名称 / 国家 / 区域，支持不完整输入与少量拼写容错） |
 | get_book_detail | 按作品 ID 查询详情（含作者、地点、流派） |
 | get_reading_records | 查询演示用户的阅读记录（可按状态筛选） |
 | get_reading_statistics | 统计演示用户的阅读记录（想读 / 在读 / 读完 / 总数） |
+
+模糊搜索工具的返回结果按相关度排序（精确 > 前缀 > 包含 > 分词 > 容错），
+并携带 `match_type` 与 `exact_match_exists` 字段：`exact` / `prefix` / `contains` / `token`
+为确定级命中；`fuzzy` 为近似匹配（用户输入可能有拼写错误时的兜底候选）。
+仅当存在确定级命中且能明确对应用户所指时，Agent 才将其作为确定的作品 / 作者信息；
+只有 `fuzzy` 候选或多个候选时，应向用户列出候选并请其确认，不得当作确定结论。
 
 > 推荐作品时 Agent 只能基于数据库真实存在的作品，不会虚构书籍。
 
@@ -895,6 +902,88 @@ GET /api/authors?limit=20&offset=0&keyword=马尔克斯
 |--------|------|
 | 404 | 该 id 的作者不存在 |
 | 422 | `author_id` 不是整数 |
+
+---
+
+## 11. 统一模糊搜索（全站搜索框）
+
+跨作品、作者、地点、国家、文学流派的一次性模糊搜索，供前端全站搜索框使用。
+
+### 请求
+
+```
+GET /api/search?q=<关键词>&per_group=<每组条数上限>
+```
+
+### 查询参数
+
+| 参数 | 必填 | 默认 | 说明 |
+|------|------|------|------|
+| q | 是 | - | 搜索关键词（1 个字符以上；自动去首尾空格、合并连续空格、英文不区分大小写） |
+| per_group | 否 | 5 | 每类结果条数上限（1–20） |
+
+### 匹配规则（统一模糊检索引擎）
+
+- 匹配范围：作品书名 / 原名 / 作者姓名 / 流派名；作者姓名 / 国籍；地点名称 / 国家 / 区域；流派名称。
+- 相关度排序：精确匹配 > 前缀匹配 > 包含匹配 > 多词分词全命中 > 容错匹配（编辑距离）。
+- 轻量拼写容错：关键词 2 字符及以上启用（≤4 字容错 1 个字符，≥5 字容错 2 个）；
+  容错为全局兜底——仅当本次查询在任何分组都没有确定级命中时才返回容错结果，且每组最多 3 条，
+  避免模糊匹配返回大量无关结果。
+- 每条结果带 `match_type` 字段标识命中方式（`exact` / `prefix` / `contains` / `token` / `fuzzy`）。
+
+### 请求示例
+
+```
+GET /api/search?q=百年&per_group=5
+GET /api/search?q=old%20man
+```
+
+### 成功响应（HTTP 200）
+
+```json
+{
+  "query": "百年",
+  "total": 1,
+  "fuzzy_fallback": false,
+  "groups": {
+    "works": [
+      {
+        "id": 1,
+        "title": "百年孤独",
+        "original_title": "Cien años de soledad",
+        "publication_year": 1967,
+        "authors": ["加夫列尔·加西亚·马尔克斯"],
+        "genres": ["魔幻现实主义"],
+        "match_type": "prefix",
+        "matched_by": "title"
+      }
+    ],
+    "authors": [],
+    "places": [],
+    "countries": [],
+    "genres": []
+  }
+}
+```
+
+### 字段说明
+
+| 字段 | 说明 |
+|------|------|
+| query | 清洗后的关键词 |
+| total | 五个分组的命中总条数 |
+| fuzzy_fallback | 是否为容错兜底结果（本次查询没有任何确定级命中时为 `true`） |
+| groups.works | 命中的作品（matched_by 指示命中的字段：title / original_title / author / genre） |
+| groups.authors | 命中的作者，`work_titles[]` 为其作品名 |
+| groups.places | 命中的城市 / 区域 / 虚构地点（国家类型的地点归入 countries） |
+| groups.countries | 命中的国家：`place_id` 可定位地图（无则为 `null`），`work_count` 为相关作品数 |
+| groups.genres | 命中的流派，`work_count` 为该流派下作品数 |
+
+### 常见错误
+
+| 状态码 | 说明 |
+|--------|------|
+| 422 | 缺少 `q` 或为空 / `per_group` 超出范围 |
 
 ---
 
