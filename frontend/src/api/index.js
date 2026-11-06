@@ -144,7 +144,13 @@ function toIso3(country) {
 }
 
 function hasCoords(p) {
-  return p && Number.isFinite(Number(p.latitude)) && Number.isFinite(Number(p.longitude))
+  if (!p) return false
+  // 显式排除 null/undefined/空字符串，避免 Number(null)===0 把无坐标地点当成 (0,0)
+  if (p.latitude == null || p.longitude == null) return false
+  if (p.latitude === '' || p.longitude === '') return false
+  const lat = Number(p.latitude)
+  const lng = Number(p.longitude)
+  return Number.isFinite(lat) && Number.isFinite(lng)
 }
 
 // 旧状态值 → 新状态值（兼容 localStorage 里的旧 Mock 缓存）
