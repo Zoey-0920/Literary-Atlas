@@ -166,6 +166,7 @@ function resetView() {
 
 function onWheel(e) {
   if (!wrapRef.value) return
+  closeClusterMenu()
   const rect = wrapRef.value.getBoundingClientRect()
   const fx = (e.clientX - rect.left) / rect.width
   const fy = (e.clientY - rect.top) / rect.height
@@ -211,12 +212,45 @@ function endDrag() { dragging.value = false }
 // 点击地图空白处关闭弹窗；但刚拖动完浏览器补发的 click 要吞掉，避免误关
 function onMapClick() {
   if (dragMoved) { dragMoved = false; return }
+  closeClusterMenu()
   mapStore.selectedId = null
 }
 
 const selected = computed(() =>
   mapStore.selectedId ? markers.value.find(m => m.id === mapStore.selectedId) : null
 )
+
+// ---------- 近距离标记冲突处理 ----------
+// 密集城市在低缩放下标记热区重叠，直接选择易误选相邻地点：
+// 点击时若附近（屏幕像素距离）存在多个标记，先弹出候选列表由用户明确选择。
+const CLUSTER_RADIUS = 20 // 屏幕像素：两标记中心距小于该值视为"过近"
+const clusterMenu = ref(null) // { x, y, items: [marker] } | null
+
+function closeClusterMenu() { clusterMenu.value = null }
+
+function onMarkerClick(m) {
+  const near = visibleMarkers.value.filter(o => {
+    const dx = o.sx - m.sx
+    const dy = o.sy - m.sy
+    return dx * dx + dy * dy <= CLUSTER_RADIUS * CLUSTER_RADIUS
+  })
+  if (near.length <= 1) {
+    // 孤立标记：保持原有行为（点击选中/再次点击关闭）
+    closeClusterMenu()
+    mapStore.selectedId = mapStore.selectedId === m.id ? null : m.id
+    return
+  }
+  // 多个标记过近：展示候选列表（含被点中的那个），不直接选中
+  clusterMenu.value = { x: m.sx, y: m.sy, items: near }
+}
+
+function chooseClusterItem(item) {
+  closeClusterMenu()
+  mapStore.selectedId = item.id
+}
+
+// 视图缩放、平移或模式切换后，候选列表的屏幕锚点已失效，直接关闭
+watch([zoom, () => center.x, () => center.y, () => mapStore.mode], closeClusterMenu)
 
 watch(() => mapStore.focusRequest, (req) => {
   if (!req) return
@@ -417,12 +451,30 @@ onBeforeUnmount(() => { if (ro) ro.disconnect() })
     <button v-for="m in visibleMarkers" :key="m.id"
       class="marker" :class="[m.kind, { 'is-active': m.id === mapStore.selectedId }]"
       :style="{ left: m.sx + 'px', top: m.sy + 'px', '--mk-scale': 1 + (zoom - 1) / 10 }"
-      @click.stop="mapStore.selectedId = mapStore.selectedId === m.id ? null : m.id">
+      @click.stop="onMarkerClick(m)">
       <span class="halo"></span>
       <span class="core"></span>
       <span class="ring"></span>
       <span class="label">{{ m.name }}</span>
     </button>
+
+    <!-- 近距离标记候选列表：多个地点重叠时，点击先列出附近地点，由用户明确选择 -->
+    <transition name="pop">
+      <div v-if="clusterMenu" class="cluster-menu"
+        :style="{
+          left: Math.max(8, Math.min(wrapSize.w - 240, clusterMenu.x - 12)) + 'px',
+          top: Math.min(wrapSize.h - 150, clusterMenu.y + 14) + 'px'
+        }">
+        <p class="cluster-title">此区域有 {{ clusterMenu.items.length }} 个相近地点</p>
+        <button v-for="it in clusterMenu.items" :key="it.id" class="cluster-item"
+          @click.stop="chooseClusterItem(it)">
+          <span class="ci-dot" :class="it.kind"></span>
+          <span class="ci-name">{{ it.name }}</span>
+          <span class="ci-country">{{ it.data.country }}</span>
+        </button>
+        <button class="cluster-cancel" @click.stop="closeClusterMenu">取消</button>
+      </div>
+    </transition>
 
     <!-- 信息面板 -->
     <transition name="pop">
@@ -586,8 +638,9 @@ onBeforeUnmount(() => { if (ro) ro.disconnect() })
   width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%;
   border: 1px solid rgba(170, 130, 66, .5); opacity: 0;
 }
-/* 灯光缩小后的可点击热区（透明，不显示） */
-.marker::after { content: ""; position: absolute; left: -11px; top: -11px; width: 22px; height: 22px; border-radius: 50%; }
+/* 灯光缩小后的可点击热区（透明，不显示）：适度扩大响应范围，
+   过近标记由候选列表兜底，扩区不会挤占相邻地点的选择 */
+.marker::after { content: ""; position: absolute; left: -13px; top: -13px; width: 26px; height: 26px; border-radius: 50%; }
 
 .marker.major { --core: #fff6de; --glow: rgba(170, 130, 66, .5); --halo: rgba(170, 130, 66, .38); }
 .marker.major .core { width: 6px; height: 6px; margin: -3px 0 0 -3px; }
@@ -680,6 +733,41 @@ onBeforeUnmount(() => { if (ro) ro.disconnect() })
 .popup-book:hover .pb-title { color: var(--accent); }
 .pb-title { font-family: Georgia, 'Songti SC', serif; }
 .pb-status { font-size: 12px; color: var(--accent-soft); white-space: nowrap; }
+
+/* ---- 近距离标记候选列表：与弹窗一致的金边深蓝底古典质感 ---- */
+.cluster-menu {
+  position: absolute; z-index: 25; min-width: 180px; max-width: 230px;
+  background: rgba(8, 14, 26, .96); backdrop-filter: blur(10px);
+  border: 1px solid rgba(212, 180, 119, .38); border-radius: 10px;
+  padding: 10px 10px 8px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, .6), 0 4px 14px rgba(0, 0, 0, .45);
+}
+.cluster-menu::before {
+  content: ""; position: absolute; inset: 4px; border-radius: 7px;
+  border: 1px solid rgba(212, 180, 119, .13); pointer-events: none;
+}
+.cluster-title { font-size: 11px; letter-spacing: .08em; color: var(--muted); margin-bottom: 6px; }
+.cluster-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 8px; background: transparent; border: none; border-radius: 6px;
+  cursor: pointer; text-align: left; color: var(--ink);
+}
+.cluster-item:hover { background: rgba(212, 180, 119, .14); }
+.ci-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: #f5dda6; box-shadow: 0 0 6px rgba(146, 111, 58, .8);
+}
+.ci-dot.minor { background: #e9cf9c; }
+.ci-dot.want, .ci-dot.want_to_read { background: #cdb4f2; }
+.ci-dot.reading { background: #d7e8f8; }
+.ci-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ci-country { font-size: 11px; color: var(--accent); margin-left: auto; padding-left: 8px; white-space: nowrap; }
+.cluster-cancel {
+  margin-top: 6px; width: 100%; height: 26px; font-size: 12px;
+  color: var(--muted); background: transparent;
+  border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+}
+.cluster-cancel:hover { color: var(--ink); }
 
 .zoom-controls { position: absolute; left: 16px; bottom: 16px; z-index: 15; display: flex; flex-direction: column; overflow: hidden; border: 1px solid rgba(212, 180, 119, .4); border-radius: 6px; background: rgba(13, 25, 41, .85); }
 .zoom-controls button { width: 34px; height: 34px; background: transparent; border: none; color: var(--ink); font-size: 16px; cursor: pointer; border-bottom: 1px solid var(--line); }
